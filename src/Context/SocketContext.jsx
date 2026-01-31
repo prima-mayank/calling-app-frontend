@@ -96,11 +96,38 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     const userId = UUIDv4();
 
+    // Auto-detect environment
+    const isProduction = window.location.protocol === "https:";
+    const isLocalhost = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+
+    // Smart fallbacks: env vars → production defaults → localhost defaults
+    const peerHost = import.meta.env.VITE_PEER_HOST || 
+      (isProduction ? window.location.hostname : "localhost");
+    
+    const peerPort = import.meta.env.VITE_PEER_PORT ? 
+      Number(import.meta.env.VITE_PEER_PORT) : 
+      (isProduction ? 443 : 5000);
+    
+    const peerPath = import.meta.env.VITE_PEER_PATH || "/peerjs/myapp";
+    
+    const peerSecure = import.meta.env.VITE_PEER_SECURE ? 
+      import.meta.env.VITE_PEER_SECURE === "true" : 
+      isProduction;
+
+    console.log("Peer Config:", { peerHost, peerPort, peerPath, peerSecure });
+
     const newPeer = new Peer(userId, {
-      host: import.meta.env.VITE_PEER_HOST || "localhost",
-      port: import.meta.env.VITE_PEER_PORT || 9000,
-      path: import.meta.env.VITE_PEER_PATH || "/myapp",
-    });
+      host: peerHost,
+      port: peerPort,
+      path: peerPath,
+      secure: peerSecure,
+      config: {
+        iceServers: [
+          { urls: ["stun:stun.l.google.com:19302"] },
+          { urls: ["stun:stun1.l.google.com:19302"] }
+        ]
+      }
+    }); 
 
     setUser(newPeer);
     fetchUserFeed();
@@ -240,4 +267,4 @@ export const SocketProvider = ({ children }) => {
       {children}
     </SocketContext.Provider>
   );
-};
+}
