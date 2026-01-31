@@ -8,7 +8,8 @@ import { v4 as UUIDv4 } from "uuid";
 import { peerReducer } from "../Reducers/peerReducer";
 import { addPeerAction } from "../Actions/peerAction";
 
-const WS_SERVER = "http://localhost:5000";
+const WS_SERVER = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
+console.log("Connecting to WebSocket server:", WS_SERVER);
 
 export const SocketContext = createContext(null);
 
@@ -96,9 +97,9 @@ export const SocketProvider = ({ children }) => {
     const userId = UUIDv4();
 
     const newPeer = new Peer(userId, {
-      host: "localhost",
-      port: 9000,
-      path: "/myapp"
+      host: import.meta.env.VITE_PEER_HOST || "localhost",
+      port: import.meta.env.VITE_PEER_PORT || 9000,
+      path: import.meta.env.VITE_PEER_PATH || "/myapp",
     });
 
     setUser(newPeer);
