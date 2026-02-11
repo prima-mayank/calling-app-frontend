@@ -26,16 +26,18 @@ export const SocketProvider = ({ children }) => {
 
   const callsRef = useRef({});
   const pendingParticipantsRef = useRef([]);
+  const screenTrackRef = useRef(null);
+  const cameraTrackRef = useRef(null);
+  const cameraTrackEnabledBeforeShareRef = useRef(true);
 
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
 
-  // 1. CHANGED: Helper to initialize media based on user choice
   const provideStream = async (isVideoCall = true) => {
     try {
       const constraints = {
         audio: true,
-        // If audio-only, explicitly set video to false
         video: isVideoCall ? true : false
       };
       
@@ -44,7 +46,6 @@ export const SocketProvider = ({ children }) => {
       setStream(media);
       setAudioEnabled(media.getAudioTracks().some(t => t.enabled));
       
-      // If video was requested, check status, else false
       if (isVideoCall) {
         setVideoEnabled(media.getVideoTracks().some(t => t.enabled));
       } else {
@@ -93,7 +94,30 @@ export const SocketProvider = ({ children }) => {
     });
   };
 
-  // 2. CHANGED: Removed automatic fetchUserFeed() from this useEffect
+  const replaceVideoTrackForAllCalls = async (nextTrack) => {
+    if (!nextTrack) return;
+
+    const calls = Object.values(callsRef.current);
+    await Promise.all(
+      calls.map(async (call) => {
+        const pc = call?.peerConnection || call?._pc;
+        if (!pc) return;
+
+        const sender = pc
+          .getSenders()
+          .find((s) => s.track && s.track.kind === "video");
+
+        if (!sender) return;
+
+        try {
+          await sender.replaceTrack(nextTrack);
+        } catch (err) {
+          console.warn("Failed to replace video track for peer", call.peer, err);
+        }
+      })
+    );
+  };
+
   useEffect(() => {
     const userId = UUIDv4();
     const isProduction = window.location.protocol === "https:";
@@ -112,8 +136,6 @@ export const SocketProvider = ({ children }) => {
 
     setUser(newPeer);
     
-    // We do NOT call fetchUserFeed() here anymore.
-    // The UI must call provideStream() explicitly.
 
     const enterRoom = ({ roomId }) => {
       navigate(`/room/${roomId}`);
@@ -172,9 +194,13 @@ export const SocketProvider = ({ children }) => {
     setStream(new MediaStream(stream.getTracks()));
   };
 
-  // 3. CHANGED: Safer toggle for camera (checks if track exists)
   const toggleCamera = () => {
     if (!stream) return;
+    if (isScreenSharing) {
+      console.warn("Stop screen sharing before toggling camera.");
+      return;
+    }
+
     const videoTracks = stream.getVideoTracks();
     if (videoTracks.length === 0) {
         console.warn("No video tracks to toggle (Audio Only mode)");
@@ -185,6 +211,78 @@ export const SocketProvider = ({ children }) => {
     });
     setVideoEnabled(videoTracks.some(t => t.enabled));
     setStream(new MediaStream(stream.getTracks()));
+  };
+
+  const startScreenShare = async () => {
+    if (!stream || isScreenSharing) return;
+
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      alert("Screen sharing is not supported in this browser.");
+      return;
+    }
+
+    const cameraTrack = stream.getVideoTracks()[0];
+    if (!cameraTrack) {
+      alert("Screen sharing is available only when you join with video.");
+      return;
+    }
+
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+      const screenTrack = displayStream.getVideoTracks()[0];
+      if (!screenTrack) return;
+
+      cameraTrackRef.current = cameraTrack;
+      cameraTrackEnabledBeforeShareRef.current = cameraTrack.enabled;
+      screenTrackRef.current = screenTrack;
+
+      screenTrack.onended = () => {
+        stopScreenShare();
+      };
+
+      await replaceVideoTrackForAllCalls(screenTrack);
+
+      const updatedTracks = stream
+        .getTracks()
+        .map((track) => (track.kind === "video" ? screenTrack : track));
+      setStream(new MediaStream(updatedTracks));
+      setVideoEnabled(screenTrack.enabled);
+      setIsScreenSharing(true);
+    } catch (err) {
+      console.error("getDisplayMedia failed:", err);
+    }
+  };
+
+  const stopScreenShare = async () => {
+    const screenTrack = screenTrackRef.current;
+    const cameraTrack = cameraTrackRef.current;
+    if (!screenTrack && !cameraTrack) return;
+
+    if (cameraTrack) {
+      await replaceVideoTrackForAllCalls(cameraTrack);
+
+      if (stream) {
+        const restoredTracks = stream
+          .getTracks()
+          .map((track) => (track.kind === "video" ? cameraTrack : track));
+        setStream(new MediaStream(restoredTracks));
+      }
+
+      cameraTrack.enabled = cameraTrackEnabledBeforeShareRef.current;
+      setVideoEnabled(cameraTrack.enabled);
+    }
+
+    if (screenTrack) {
+      screenTrack.onended = null;
+      try { screenTrack.stop(); } catch (e) {}
+    }
+
+    screenTrackRef.current = null;
+    cameraTrackRef.current = null;
+    setIsScreenSharing(false);
   };
 
   const endCall = (roomId) => {
@@ -199,6 +297,14 @@ export const SocketProvider = ({ children }) => {
       stream.getTracks().forEach(t => t.stop());
     }
 
+    if (screenTrackRef.current) {
+      screenTrackRef.current.onended = null;
+      try { screenTrackRef.current.stop(); } catch (e) {}
+      screenTrackRef.current = null;
+    }
+    cameraTrackRef.current = null;
+    setIsScreenSharing(false);
+
     Object.keys(peers).forEach(pid => {
       dispatch({ type: "REMOVE_PEER", payload: { peerId: pid } });
     });
@@ -208,7 +314,6 @@ export const SocketProvider = ({ children }) => {
     setStream(null);
     setUser(null);
     navigate("/");
-    // Force reload to clean up any retained peer instances/sockets
     window.location.reload(); 
   };
 
@@ -220,9 +325,12 @@ export const SocketProvider = ({ children }) => {
       peers,
       audioEnabled,
       videoEnabled,
-      provideStream, // Exposed new function
+      isScreenSharing,
+      provideStream, 
       toggleMic,
       toggleCamera,
+      startScreenShare,
+      stopScreenShare,
       endCall
     }}>
       {children}

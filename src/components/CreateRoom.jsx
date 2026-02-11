@@ -5,7 +5,6 @@ const CreateRoom = () => {
   const { socket } = useContext(SocketContext);
 
   const initRoom = () => {
-    // console.log("Initialising a req to create a room", socket);
     socket.emit("create-room");
   };
 

@@ -13,9 +13,12 @@ const Room = () => {
     peers,
     audioEnabled,
     videoEnabled,
+    isScreenSharing,
     provideStream, // Need this to initialize stream if joining via link
     toggleMic,
     toggleCamera,
+    startScreenShare,
+    stopScreenShare,
     endCall,
   } = useContext(SocketContext);
 
@@ -63,6 +66,8 @@ const Room = () => {
     );
   }
 
+  const canShareScreen = isScreenSharing || stream.getVideoTracks().length > 0;
+
   // Main Room UI
   return (
     <div style={{ padding: 12 }}>
@@ -75,10 +80,33 @@ const Room = () => {
         
         {/* Only show camera toggle if we actually have video tracks */}
         {stream.getVideoTracks().length > 0 && (
-           <button onClick={toggleCamera} style={{ marginRight: 8 }}>
-             {videoEnabled ? "Turn Camera Off" : "Turn Camera On"}
+           <button
+             onClick={toggleCamera}
+             disabled={isScreenSharing}
+             style={{
+               marginRight: 8,
+               opacity: isScreenSharing ? 0.6 : 1,
+               cursor: isScreenSharing ? "not-allowed" : "pointer",
+             }}
+           >
+             {isScreenSharing ? "Stop Sharing to Use Camera" : (videoEnabled ? "Turn Camera Off" : "Turn Camera On")}
            </button>
         )}
+
+        <button
+          onClick={isScreenSharing ? stopScreenShare : startScreenShare}
+          disabled={!canShareScreen}
+          style={{
+            marginRight: 8,
+            background: isScreenSharing ? "#DD6B20" : "#2F855A",
+            color: "#fff",
+            opacity: canShareScreen ? 1 : 0.5,
+            cursor: canShareScreen ? "pointer" : "not-allowed",
+          }}
+          title={canShareScreen ? "" : "Join with video to enable screen sharing"}
+        >
+          {isScreenSharing ? "Stop Sharing" : "Share Screen"}
+        </button>
 
         <button
           onClick={() => endCall(id)}
@@ -107,7 +135,10 @@ const Room = () => {
       <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
         {/* Local Feed */}
         <div>
-          <h4>You {stream.getVideoTracks().length === 0 && "(Audio Only)"}</h4>
+          <h4>
+            You {stream.getVideoTracks().length === 0 && "(Audio Only)"}{" "}
+            {isScreenSharing && "(Sharing Screen)"}
+          </h4>
           <UserFeedPlayer stream={stream} muted={true} isLocal />
         </div>
 
