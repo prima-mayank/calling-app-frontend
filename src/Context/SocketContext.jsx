@@ -1,82 +1,140 @@
-// SocketContext.jsx
-import SocketIoClient from "socket.io-client";
-import { createContext, useEffect, useRef, useState, useReducer } from "react";
+﻿import SocketIoClient from "socket.io-client";
+import { useCallback, useEffect, useRef, useState, useReducer } from "react";
 import { useNavigate } from "react-router-dom";
 import Peer from "peerjs";
 import { v4 as UUIDv4 } from "uuid";
 
 import { peerReducer } from "../Reducers/peerReducer";
-import { addPeerAction } from "../Actions/peerAction";
+import { addPeerAction, removePeerAction } from "../Actions/peerAction";
+import { SocketContext } from "./socketContextValue";
 
 const WS_SERVER = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 
-export const SocketContext = createContext(null);
+const parsePort = (value) => {
+  const port = Number(value);
+  if (!Number.isFinite(port) || port <= 0) return null;
+  return port;
+};
+
+const buildPeerConnectionConfig = () => {
+  const isBrowser = typeof window !== "undefined";
+  const isProduction = isBrowser ? window.location.protocol === "https:" : false;
+
+  let socketHost = null;
+  let socketPort = null;
+  let socketSecure = isProduction;
+
+  if (isBrowser) {
+    try {
+      const socketUrl = new URL(WS_SERVER, window.location.origin);
+      socketHost = socketUrl.hostname || null;
+      socketPort = socketUrl.port
+        ? parsePort(socketUrl.port)
+        : socketUrl.protocol === "https:"
+        ? 443
+        : 80;
+      socketSecure = socketUrl.protocol === "https:";
+    } catch {
+      // noop: fallback values below
+    }
+  }
+
+  const envHost = import.meta.env.VITE_PEER_HOST;
+  const envPort = parsePort(import.meta.env.VITE_PEER_PORT);
+  const envSecure = import.meta.env.VITE_PEER_SECURE;
+
+  return {
+    host:
+      envHost ||
+      socketHost ||
+      (isProduction && isBrowser ? window.location.hostname : "localhost"),
+    port: envPort || socketPort || (isProduction ? 443 : 5000),
+    path: import.meta.env.VITE_PEER_PATH || "/peerjs/myapp",
+    secure: envSecure ? envSecure === "true" : socketSecure,
+  };
+};
 
 const socket = SocketIoClient(WS_SERVER, {
   withCredentials: false,
-  transports: ["polling", "websocket"]
+  transports: ["polling"],
+  upgrade: false,
 });
 
 export const SocketProvider = ({ children }) => {
   const navigate = useNavigate();
 
-  const [user, setUser] = useState(null);
+  const [user, setUser] = useState(() => new Peer(UUIDv4(), buildPeerConnectionConfig()));
   const [stream, setStream] = useState(null);
   const [peers, dispatch] = useReducer(peerReducer, {});
 
   const callsRef = useRef({});
   const pendingParticipantsRef = useRef([]);
-  const screenTrackRef = useRef(null);
-  const cameraTrackRef = useRef(null);
-  const cameraTrackEnabledBeforeShareRef = useRef(true);
+  const remoteSessionIdRef = useRef(null);
+  const userRef = useRef(user);
+  const streamRef = useRef(stream);
 
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
+
+  const [remoteDesktopSession, setRemoteDesktopSession] = useState(null);
+  const [remoteDesktopPendingRequest, setRemoteDesktopPendingRequest] = useState(null);
+  const [incomingRemoteDesktopRequest, setIncomingRemoteDesktopRequest] = useState(null);
+  const [remoteDesktopFrame, setRemoteDesktopFrame] = useState(null);
+  const [remoteDesktopError, setRemoteDesktopError] = useState("");
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => {
+    streamRef.current = stream;
+  }, [stream]);
 
   const provideStream = async (isVideoCall = true) => {
+    const mediaApiMissing = !navigator.mediaDevices?.getUserMedia;
+
+    if (mediaApiMissing) {
+      return null;
+    }
+
     try {
       const constraints = {
         audio: true,
-        video: isVideoCall ? true : false
+        video: isVideoCall ? true : false,
       };
-      
+
       const media = await navigator.mediaDevices.getUserMedia(constraints);
-      
+
       setStream(media);
-      setAudioEnabled(media.getAudioTracks().some(t => t.enabled));
-      
+      setAudioEnabled(media.getAudioTracks().some((t) => t.enabled));
+
       if (isVideoCall) {
-        setVideoEnabled(media.getVideoTracks().some(t => t.enabled));
+        setVideoEnabled(media.getVideoTracks().some((t) => t.enabled));
       } else {
         setVideoEnabled(false);
       }
 
       return media;
     } catch (err) {
-      console.error("getUserMedia failed:", err);
-      alert("Please allow access to microphone (and camera for video calls).");
+      console.error("getUserMedia failed:", err?.name || err, err);
+
+      if (err?.name === "NotAllowedError") {
+        return null;
+      }
+
+      if (err?.name === "NotFoundError" || err?.name === "DevicesNotFoundError") {
+        return null;
+      }
+
+      if (err?.name === "NotReadableError") {
+        return null;
+      }
+
       return null;
     }
   };
 
-  const fetchParticipantList = ({ roomId, participants }) => {
-    if (!participants || participants.length === 0) return;
-    if (user && stream) {
-      participants.forEach(pid => {
-        if (pid === user.id) return;
-        if (!callsRef.current[pid]) {
-          const call = user.call(pid, stream);
-          setupCallHandlers(call, pid);
-          callsRef.current[pid] = call;
-        }
-      });
-    } else {
-      pendingParticipantsRef.current = pendingParticipantsRef.current.concat(participants);
-    }
-  };
-
-  const setupCallHandlers = (call, peerId) => {
+  const setupCallHandlers = useCallback((call, peerId) => {
     if (!call) return;
     callsRef.current[peerId] = call;
 
@@ -85,70 +143,204 @@ export const SocketProvider = ({ children }) => {
     });
 
     call.on("close", () => {
-      dispatch({ type: "REMOVE_PEER", payload: { peerId } });
+      dispatch(removePeerAction(peerId));
       delete callsRef.current[peerId];
     });
 
     call.on("error", (err) => {
       console.warn("call error with", peerId, err);
     });
+  }, []);
+
+  const fetchParticipantList = useCallback(({ participants }) => {
+    if (!participants || participants.length === 0) return;
+
+    const uniqueParticipants = [...new Set(participants)];
+    const localUser = userRef.current;
+    const localStream = streamRef.current;
+
+    if (localUser && localStream) {
+      uniqueParticipants.forEach((pid) => {
+        if (pid === localUser.id) return;
+        if (!callsRef.current[pid]) {
+          const call = localUser.call(pid, localStream);
+          setupCallHandlers(call, pid);
+          callsRef.current[pid] = call;
+        }
+      });
+    } else {
+      pendingParticipantsRef.current = [
+        ...new Set([...pendingParticipantsRef.current, ...uniqueParticipants]),
+      ];
+    }
+  }, [setupCallHandlers]);
+
+  const requestRemoteDesktopSession = () => {
+    setRemoteDesktopError("");
+    setRemoteDesktopPendingRequest(null);
+    socket.emit("remote-session-request");
   };
 
-  const replaceVideoTrackForAllCalls = async (nextTrack) => {
-    if (!nextTrack) return;
+  const stopRemoteDesktopSession = () => {
+    if (remoteDesktopSession?.sessionId) {
+      socket.emit("remote-session-stop", {
+        sessionId: remoteDesktopSession.sessionId,
+      });
+      return;
+    }
 
-    const calls = Object.values(callsRef.current);
-    await Promise.all(
-      calls.map(async (call) => {
-        const pc = call?.peerConnection || call?._pc;
-        if (!pc) return;
+    if (remoteDesktopPendingRequest?.requestId) {
+      socket.emit("remote-session-stop");
+      setRemoteDesktopPendingRequest(null);
+      setRemoteDesktopError("");
+    }
+  };
 
-        const sender = pc
-          .getSenders()
-          .find((s) => s.track && s.track.kind === "video");
+  const respondToRemoteDesktopRequest = (accepted) => {
+    if (!incomingRemoteDesktopRequest?.requestId) return;
 
-        if (!sender) return;
+    socket.emit("remote-session-ui-decision", {
+      requestId: incomingRemoteDesktopRequest.requestId,
+      accepted: !!accepted,
+      reason: accepted ? "" : "Rejected by participant.",
+    });
+    setIncomingRemoteDesktopRequest(null);
+  };
 
-        try {
-          await sender.replaceTrack(nextTrack);
-        } catch (err) {
-          console.warn("Failed to replace video track for peer", call.peer, err);
-        }
-      })
-    );
+  const sendRemoteDesktopInput = (event) => {
+    if (!remoteDesktopSession?.sessionId) return;
+    if (!event || !event.type) return;
+
+    const normalizedEvent = { ...event };
+    const type = normalizedEvent.type;
+
+    if (
+      type === "move" ||
+      type === "click" ||
+      type === "mouse-down" ||
+      type === "mouse-up" ||
+      type === "wheel"
+    ) {
+      const x = Number(normalizedEvent.x);
+      const y = Number(normalizedEvent.y);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+      normalizedEvent.x = Math.min(1, Math.max(0, x));
+      normalizedEvent.y = Math.min(1, Math.max(0, y));
+    }
+
+    socket.emit("remote-input", {
+      sessionId: remoteDesktopSession.sessionId,
+      event: normalizedEvent,
+    });
   };
 
   useEffect(() => {
-    const userId = UUIDv4();
-    const isProduction = window.location.protocol === "https:";
-    
-    const peerHost = import.meta.env.VITE_PEER_HOST || (isProduction ? window.location.hostname : "localhost");
-    const peerPort = import.meta.env.VITE_PEER_PORT ? Number(import.meta.env.VITE_PEER_PORT) : (isProduction ? 443 : 5000);
-    const peerPath = import.meta.env.VITE_PEER_PATH || "/peerjs/myapp";
-    const peerSecure = import.meta.env.VITE_PEER_SECURE ? import.meta.env.VITE_PEER_SECURE === "true" : isProduction;
-
-    const newPeer = new Peer(userId, {
-      host: peerHost,
-      port: peerPort,
-      path: peerPath,
-      secure: peerSecure,
-    }); 
-
-    setUser(newPeer);
-    
-
     const enterRoom = ({ roomId }) => {
       navigate(`/room/${roomId}`);
     };
 
+    const onRoomNotFound = () => {
+      alert("Room not found. Ask the host to create a new room link.");
+      navigate("/");
+    };
+
+    const onUserLeft = ({ peerId }) => {
+      if (!peerId) return;
+
+      dispatch(removePeerAction(peerId));
+      delete callsRef.current[peerId];
+    };
+
+    const onRemoteSessionPending = ({ requestId, hostId }) => {
+      if (!requestId) return;
+      setRemoteDesktopPendingRequest({ requestId, hostId });
+      setRemoteDesktopError("");
+    };
+
+    const onRemoteSessionRequestedUi = ({ requestId, requesterId }) => {
+      if (!requestId) return;
+      setIncomingRemoteDesktopRequest({
+        requestId,
+        requesterId: requesterId || "another participant",
+      });
+    };
+
+    const onRemoteSessionStarted = ({ sessionId, hostId }) => {
+      if (!sessionId) return;
+      remoteSessionIdRef.current = sessionId;
+      setRemoteDesktopSession({ sessionId, hostId });
+      setRemoteDesktopPendingRequest(null);
+      setRemoteDesktopFrame(null);
+      setRemoteDesktopError("");
+    };
+
+    const onRemoteSessionEnded = ({ sessionId }) => {
+      if (!sessionId) return;
+      if (remoteSessionIdRef.current === sessionId) {
+        remoteSessionIdRef.current = null;
+      }
+
+      setRemoteDesktopSession((prev) => {
+        if (!prev) return prev;
+        if (prev.sessionId !== sessionId) return prev;
+        return null;
+      });
+      setRemoteDesktopPendingRequest(null);
+      setIncomingRemoteDesktopRequest(null);
+      setRemoteDesktopFrame(null);
+    };
+
+    const onRemoteFrame = ({ sessionId, image }) => {
+      if (!sessionId || typeof image !== "string") return;
+      if (remoteSessionIdRef.current !== sessionId) return;
+      setRemoteDesktopFrame(`data:image/jpeg;base64,${image}`);
+    };
+
+    const onRemoteSessionError = ({ message }) => {
+      const normalizedMessage =
+        typeof message === "string" && message.trim()
+          ? message.trim()
+          : "Remote session failed.";
+      setRemoteDesktopError(normalizedMessage);
+      setRemoteDesktopPendingRequest(null);
+      setIncomingRemoteDesktopRequest(null);
+      alert(normalizedMessage);
+    };
+
+    const onSocketDisconnect = () => {
+      remoteSessionIdRef.current = null;
+      setRemoteDesktopSession(null);
+      setRemoteDesktopPendingRequest(null);
+      setIncomingRemoteDesktopRequest(null);
+      setRemoteDesktopFrame(null);
+    };
+
     socket.on("room-created", enterRoom);
+    socket.on("room-not-found", onRoomNotFound);
     socket.on("get-users", fetchParticipantList);
+    socket.on("user-left", onUserLeft);
+    socket.on("remote-session-pending", onRemoteSessionPending);
+    socket.on("remote-session-requested-ui", onRemoteSessionRequestedUi);
+    socket.on("remote-session-started", onRemoteSessionStarted);
+    socket.on("remote-session-ended", onRemoteSessionEnded);
+    socket.on("remote-frame", onRemoteFrame);
+    socket.on("remote-session-error", onRemoteSessionError);
+    socket.on("disconnect", onSocketDisconnect);
 
     return () => {
       socket.off("room-created", enterRoom);
+      socket.off("room-not-found", onRoomNotFound);
       socket.off("get-users", fetchParticipantList);
+      socket.off("user-left", onUserLeft);
+      socket.off("remote-session-pending", onRemoteSessionPending);
+      socket.off("remote-session-requested-ui", onRemoteSessionRequestedUi);
+      socket.off("remote-session-started", onRemoteSessionStarted);
+      socket.off("remote-session-ended", onRemoteSessionEnded);
+      socket.off("remote-frame", onRemoteFrame);
+      socket.off("remote-session-error", onRemoteSessionError);
+      socket.off("disconnect", onSocketDisconnect);
     };
-  }, []);
+  }, [fetchParticipantList, navigate]);
 
   useEffect(() => {
     if (!user || !stream) return;
@@ -158,16 +350,18 @@ export const SocketProvider = ({ children }) => {
       setupCallHandlers(call, call.peer);
     });
 
-    socket.on("user-joined", ({ peerId }) => {
+    const onUserJoined = ({ peerId }) => {
       if (!peerId || peerId === user.id) return;
       if (!callsRef.current[peerId]) {
         const call = user.call(peerId, stream);
         setupCallHandlers(call, peerId);
       }
-    });
+    };
+
+    socket.on("user-joined", onUserJoined);
 
     if (pendingParticipantsRef.current.length > 0) {
-      pendingParticipantsRef.current.forEach(pid => {
+      pendingParticipantsRef.current.forEach((pid) => {
         if (pid === user.id) return;
         if (!callsRef.current[pid]) {
           const call = user.call(pid, stream);
@@ -180,160 +374,111 @@ export const SocketProvider = ({ children }) => {
     socket.emit("ready");
 
     return () => {
-      try { user.off("call"); } catch (e) {}
-      socket.off("user-joined");
+      try {
+        user.off("call");
+      } catch {
+        // noop
+      }
+      socket.off("user-joined", onUserJoined);
     };
-  }, [user, stream]);
+  }, [setupCallHandlers, stream, user]);
 
   const toggleMic = () => {
     if (!stream) return;
-    stream.getAudioTracks().forEach(t => {
+    stream.getAudioTracks().forEach((t) => {
       t.enabled = !t.enabled;
     });
-    setAudioEnabled(stream.getAudioTracks().some(t => t.enabled));
+    setAudioEnabled(stream.getAudioTracks().some((t) => t.enabled));
     setStream(new MediaStream(stream.getTracks()));
   };
 
   const toggleCamera = () => {
     if (!stream) return;
-    if (isScreenSharing) {
-      console.warn("Stop screen sharing before toggling camera.");
-      return;
-    }
 
     const videoTracks = stream.getVideoTracks();
     if (videoTracks.length === 0) {
-        console.warn("No video tracks to toggle (Audio Only mode)");
-        return;
+      console.warn("No video tracks to toggle (Audio Only mode)");
+      return;
     }
-    videoTracks.forEach(t => {
+    videoTracks.forEach((t) => {
       t.enabled = !t.enabled;
     });
-    setVideoEnabled(videoTracks.some(t => t.enabled));
+    setVideoEnabled(videoTracks.some((t) => t.enabled));
     setStream(new MediaStream(stream.getTracks()));
   };
 
-  const startScreenShare = async () => {
-    if (!stream || isScreenSharing) return;
-
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      alert("Screen sharing is not supported in this browser.");
-      return;
-    }
-
-    const cameraTrack = stream.getVideoTracks()[0];
-    if (!cameraTrack) {
-      alert("Screen sharing is available only when you join with video.");
-      return;
-    }
-
-    try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      });
-      const screenTrack = displayStream.getVideoTracks()[0];
-      if (!screenTrack) return;
-
-      cameraTrackRef.current = cameraTrack;
-      cameraTrackEnabledBeforeShareRef.current = cameraTrack.enabled;
-      screenTrackRef.current = screenTrack;
-
-      screenTrack.onended = () => {
-        stopScreenShare();
-      };
-
-      await replaceVideoTrackForAllCalls(screenTrack);
-
-      const updatedTracks = stream
-        .getTracks()
-        .map((track) => (track.kind === "video" ? screenTrack : track));
-      setStream(new MediaStream(updatedTracks));
-      setVideoEnabled(screenTrack.enabled);
-      setIsScreenSharing(true);
-    } catch (err) {
-      console.error("getDisplayMedia failed:", err);
-    }
-  };
-
-  const stopScreenShare = async () => {
-    const screenTrack = screenTrackRef.current;
-    const cameraTrack = cameraTrackRef.current;
-    if (!screenTrack && !cameraTrack) return;
-
-    if (cameraTrack) {
-      await replaceVideoTrackForAllCalls(cameraTrack);
-
-      if (stream) {
-        const restoredTracks = stream
-          .getTracks()
-          .map((track) => (track.kind === "video" ? cameraTrack : track));
-        setStream(new MediaStream(restoredTracks));
-      }
-
-      cameraTrack.enabled = cameraTrackEnabledBeforeShareRef.current;
-      setVideoEnabled(cameraTrack.enabled);
-    }
-
-    if (screenTrack) {
-      screenTrack.onended = null;
-      try { screenTrack.stop(); } catch (e) {}
-    }
-
-    screenTrackRef.current = null;
-    cameraTrackRef.current = null;
-    setIsScreenSharing(false);
-  };
-
   const endCall = (roomId) => {
-    Object.keys(callsRef.current).forEach(peerId => {
-      try { callsRef.current[peerId].close(); } catch (e) {}
+    if (remoteDesktopSession?.sessionId) {
+      socket.emit("remote-session-stop", { sessionId: remoteDesktopSession.sessionId });
+    }
+
+    Object.keys(callsRef.current).forEach((peerId) => {
+      try {
+        callsRef.current[peerId].close();
+      } catch {
+        // noop
+      }
       delete callsRef.current[peerId];
     });
 
-    try { if (user) user.destroy(); } catch (e) {}
+    try {
+      if (user) user.destroy();
+    } catch {
+      // noop
+    }
 
     if (stream) {
-      stream.getTracks().forEach(t => t.stop());
+      stream.getTracks().forEach((t) => t.stop());
     }
 
-    if (screenTrackRef.current) {
-      screenTrackRef.current.onended = null;
-      try { screenTrackRef.current.stop(); } catch (e) {}
-      screenTrackRef.current = null;
-    }
-    cameraTrackRef.current = null;
-    setIsScreenSharing(false);
+    setRemoteDesktopSession(null);
+    setRemoteDesktopPendingRequest(null);
+    setIncomingRemoteDesktopRequest(null);
+    remoteSessionIdRef.current = null;
+    setRemoteDesktopFrame(null);
+    setRemoteDesktopError("");
 
-    Object.keys(peers).forEach(pid => {
-      dispatch({ type: "REMOVE_PEER", payload: { peerId: pid } });
+    Object.keys(peers).forEach((pid) => {
+      dispatch(removePeerAction(pid));
     });
 
-    try { socket.emit("leave-room", { roomId, peerId: user?.id }); } catch (e) {}
+    try {
+      socket.emit("leave-room", { roomId, peerId: user?.id });
+    } catch {
+      // noop
+    }
 
     setStream(null);
     setUser(null);
     navigate("/");
-    window.location.reload(); 
+    window.location.reload();
   };
 
   return (
-    <SocketContext.Provider value={{
-      socket,
-      user,
-      stream,
-      peers,
-      audioEnabled,
-      videoEnabled,
-      isScreenSharing,
-      provideStream, 
-      toggleMic,
-      toggleCamera,
-      startScreenShare,
-      stopScreenShare,
-      endCall
-    }}>
+    <SocketContext.Provider
+      value={{
+        socket,
+        user,
+        stream,
+        peers,
+        audioEnabled,
+        videoEnabled,
+        remoteDesktopSession,
+        remoteDesktopPendingRequest,
+        incomingRemoteDesktopRequest,
+        remoteDesktopFrame,
+        remoteDesktopError,
+        provideStream,
+        toggleMic,
+        toggleCamera,
+        requestRemoteDesktopSession,
+        stopRemoteDesktopSession,
+        respondToRemoteDesktopRequest,
+        sendRemoteDesktopInput,
+        endCall,
+      }}
+    >
       {children}
     </SocketContext.Provider>
   );
-}
+};

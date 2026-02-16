@@ -1,8 +1,41 @@
-// Pages/Room.jsx
-import { useContext, useEffect, useState } from "react";
+﻿import { useContext, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
-import { SocketContext } from "../Context/SocketContext";
+import { SocketContext } from "../Context/socketContextValue";
 import UserFeedPlayer from "../components/UserFeedPlayer";
+
+const mapMouseButton = (button) => {
+  if (button === 2) return "right";
+  if (button === 1) return "middle";
+  return "left";
+};
+
+const MOVE_EVENT_THROTTLE_MS = 35;
+const TOUCH_TAP_MAX_MOVE = 0.015;
+
+const copyTextFallback = async (text) => {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return true;
+  }
+
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.setAttribute("readonly", "");
+  textArea.style.position = "absolute";
+  textArea.style.left = "-9999px";
+  document.body.appendChild(textArea);
+  textArea.select();
+
+  let copied = false;
+  try {
+    copied = document.execCommand("copy");
+  } catch {
+    copied = false;
+  }
+
+  document.body.removeChild(textArea);
+  return copied;
+};
 
 const Room = () => {
   const { id } = useParams();
@@ -13,148 +46,495 @@ const Room = () => {
     peers,
     audioEnabled,
     videoEnabled,
-    isScreenSharing,
-    provideStream, // Need this to initialize stream if joining via link
+    remoteDesktopSession,
+    remoteDesktopPendingRequest,
+    incomingRemoteDesktopRequest,
+    remoteDesktopFrame,
+    remoteDesktopError,
+    provideStream,
     toggleMic,
     toggleCamera,
-    startScreenShare,
-    stopScreenShare,
+    requestRemoteDesktopSession,
+    stopRemoteDesktopSession,
+    respondToRemoteDesktopRequest,
+    sendRemoteDesktopInput,
     endCall,
   } = useContext(SocketContext);
 
-  // State to track if user has selected media type (for direct link joins)
   const [hasJoined, setHasJoined] = useState(false);
+  const [remoteInputActive, setRemoteInputActive] = useState(false);
+  const moveThrottleRef = useRef(0);
+  const remoteSurfaceRef = useRef(null);
+  const touchStateRef = useRef({
+    active: false,
+    moved: false,
+    x: 0,
+    y: 0,
+    startX: 0,
+    startY: 0,
+  });
+  const ignoreNextClickRef = useRef(false);
 
-  // Handle joining logic
-  const handleJoinRoom = async (isVideo) => {
-    // Initialize stream
-    await provideStream(isVideo);
+  const handleJoinRoom = async (mode) => {
+    if (mode === "none") {
+      setHasJoined(true);
+      return;
+    }
+
+    const media = await provideStream(mode === "video");
+    if (!media) return;
     setHasJoined(true);
   };
 
-  // Effect to notify server ONCE we have both user (peer) and stream ready
   useEffect(() => {
-    if (user && stream && id && hasJoined) {
+    if (user && id && hasJoined) {
       socket.emit("joined-room", {
         roomId: id,
         peerId: user.id,
       });
     }
-  }, [id, user, stream, hasJoined]);
+  }, [id, user, hasJoined, socket]);
 
-  // If stream is not ready (user accessed link directly), show Pre-Join Lobby
-  if (!stream) {
+  useEffect(() => {
+    const isControlActive = remoteInputActive && !!remoteDesktopSession;
+    if (!isControlActive || !remoteDesktopSession) return;
+
+    const isTypingTarget = (element) => {
+      if (!element) return false;
+      const tag = element.tagName?.toLowerCase();
+      if (!tag) return false;
+      if (element.isContentEditable) return true;
+      return tag === "input" || tag === "textarea" || tag === "select";
+    };
+
+    const onKeyDown = (event) => {
+      if (isTypingTarget(event.target)) return;
+      if (event.key === "Escape") {
+        setRemoteInputActive(false);
+        return;
+      }
+
+      event.preventDefault();
+      sendRemoteDesktopInput({
+        type: "key-down",
+        key: event.key,
+        code: event.code,
+        repeat: event.repeat,
+      });
+    };
+
+    const onKeyUp = (event) => {
+      if (isTypingTarget(event.target)) return;
+      event.preventDefault();
+      sendRemoteDesktopInput({
+        type: "key-up",
+        key: event.key,
+        code: event.code,
+      });
+    };
+
+    window.addEventListener("keydown", onKeyDown);
+    window.addEventListener("keyup", onKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener("keyup", onKeyUp);
+    };
+  }, [remoteInputActive, remoteDesktopSession, sendRemoteDesktopInput]);
+
+  if (!hasJoined) {
     return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "20px" }}>
+      <div className="room-join-page">
         <h2>Join Room: {id}</h2>
         <p>Choose how you want to join:</p>
-        <div style={{ display: "flex", gap: "20px" }}>
-          <button 
-            onClick={() => handleJoinRoom(true)}
-            style={{ padding: "12px 24px", background: "#3182CE", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer" }}
-          >
+        <div className="room-join-actions">
+          <button onClick={() => handleJoinRoom("video")} className="btn btn-call-video btn-join">
             Join with Video
           </button>
-          <button 
-            onClick={() => handleJoinRoom(false)}
-            style={{ padding: "12px 24px", background: "#48BB78", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer" }}
-          >
+          <button onClick={() => handleJoinRoom("audio")} className="btn btn-call-audio btn-join">
             Join Audio Only
+          </button>
+          <button onClick={() => handleJoinRoom("none")} className="btn btn-default btn-join">
+            Join Without Media (Remote Only)
           </button>
         </div>
       </div>
     );
   }
 
-  const canShareScreen = isScreenSharing || stream.getVideoTracks().length > 0;
+  const buildPointerPayloadFromClient = (clientX, clientY) => {
+    const surface = remoteSurfaceRef.current;
+    if (!surface) return null;
 
-  // Main Room UI
+    const rect = surface.getBoundingClientRect();
+    if (!rect.width || !rect.height) return null;
+
+    const x = (clientX - rect.left) / rect.width;
+    const y = (clientY - rect.top) / rect.height;
+
+    return {
+      x: Math.min(1, Math.max(0, x)),
+      y: Math.min(1, Math.max(0, y)),
+    };
+  };
+
+  const buildPointerPayload = (event) =>
+    buildPointerPayloadFromClient(event.clientX, event.clientY);
+
+  const handleRemoteMove = (event) => {
+    if (!remoteDesktopSession || !isControlActive) return;
+
+    const now = Date.now();
+    if (now - moveThrottleRef.current < MOVE_EVENT_THROTTLE_MS) return;
+    moveThrottleRef.current = now;
+
+    const pointer = buildPointerPayload(event);
+    if (!pointer) return;
+
+    sendRemoteDesktopInput({
+      type: "move",
+      ...pointer,
+    });
+  };
+
+  const handleRemoteClick = (event) => {
+    if (ignoreNextClickRef.current) {
+      ignoreNextClickRef.current = false;
+      return;
+    }
+    if (!remoteDesktopSession) return;
+
+    event.preventDefault();
+    const pointer = buildPointerPayload(event);
+    if (!pointer) return;
+
+    sendRemoteDesktopInput({
+      type: "click",
+      button: mapMouseButton(event.button),
+      ...pointer,
+    });
+  };
+
+  const handleRemoteMouseDown = (event) => {
+    if (!remoteDesktopSession || !isControlActive) return;
+
+    event.preventDefault();
+    const pointer = buildPointerPayload(event);
+    if (!pointer) return;
+
+    sendRemoteDesktopInput({
+      type: "mouse-down",
+      button: mapMouseButton(event.button),
+      ...pointer,
+    });
+  };
+
+  const handleRemoteMouseUp = (event) => {
+    if (!remoteDesktopSession || !isControlActive) return;
+
+    event.preventDefault();
+    const pointer = buildPointerPayload(event);
+    if (!pointer) return;
+
+    sendRemoteDesktopInput({
+      type: "mouse-up",
+      button: mapMouseButton(event.button),
+      ...pointer,
+    });
+  };
+
+  const handleRemoteWheel = (event) => {
+    if (!remoteDesktopSession || !isControlActive) return;
+
+    event.preventDefault();
+    const pointer = buildPointerPayload(event);
+    if (!pointer) return;
+
+    sendRemoteDesktopInput({
+      type: "wheel",
+      deltaX: event.deltaX,
+      deltaY: event.deltaY,
+      ...pointer,
+    });
+  };
+
+  const connectRemoteDesktop = () => {
+    requestRemoteDesktopSession();
+  };
+
+  const isControlActive = remoteInputActive && !!remoteDesktopSession;
+  const hasVideoTrack = !!stream && stream.getVideoTracks().length > 0;
+
+  const getPrimaryTouch = (event) => event.touches?.[0] || event.changedTouches?.[0];
+
+  const handleTouchStart = (event) => {
+    if (!remoteDesktopSession) return;
+
+    const touch = getPrimaryTouch(event);
+    if (!touch) return;
+    event.preventDefault();
+
+    const pointer = buildPointerPayloadFromClient(touch.clientX, touch.clientY);
+    if (!pointer) return;
+
+    setRemoteInputActive(true);
+    touchStateRef.current = {
+      active: true,
+      moved: false,
+      x: pointer.x,
+      y: pointer.y,
+      startX: pointer.x,
+      startY: pointer.y,
+    };
+
+    sendRemoteDesktopInput({
+      type: "mouse-down",
+      button: "left",
+      ...pointer,
+    });
+  };
+
+  const handleTouchMove = (event) => {
+    if (!remoteDesktopSession || !touchStateRef.current.active) return;
+
+    const touch = getPrimaryTouch(event);
+    if (!touch) return;
+    event.preventDefault();
+
+    const now = Date.now();
+    if (now - moveThrottleRef.current < MOVE_EVENT_THROTTLE_MS) return;
+    moveThrottleRef.current = now;
+
+    const pointer = buildPointerPayloadFromClient(touch.clientX, touch.clientY);
+    if (!pointer) return;
+
+    const deltaX = Math.abs(pointer.x - touchStateRef.current.startX);
+    const deltaY = Math.abs(pointer.y - touchStateRef.current.startY);
+    if (deltaX > TOUCH_TAP_MAX_MOVE || deltaY > TOUCH_TAP_MAX_MOVE) {
+      touchStateRef.current.moved = true;
+    }
+
+    touchStateRef.current.x = pointer.x;
+    touchStateRef.current.y = pointer.y;
+
+    sendRemoteDesktopInput({
+      type: "move",
+      ...pointer,
+    });
+  };
+
+  const finishTouchInteraction = (event) => {
+    if (!remoteDesktopSession || !touchStateRef.current.active) return;
+    event.preventDefault();
+
+    const touch = getPrimaryTouch(event);
+    const pointer = touch
+      ? buildPointerPayloadFromClient(touch.clientX, touch.clientY)
+      : { x: touchStateRef.current.x, y: touchStateRef.current.y };
+    if (!pointer) {
+      touchStateRef.current.active = false;
+      return;
+    }
+
+    sendRemoteDesktopInput({
+      type: "mouse-up",
+      button: "left",
+      ...pointer,
+    });
+
+    if (!touchStateRef.current.moved) {
+      sendRemoteDesktopInput({
+        type: "click",
+        button: "left",
+        ...pointer,
+      });
+      ignoreNextClickRef.current = true;
+    }
+
+    touchStateRef.current.active = false;
+  };
+
+  const handleTouchEnd = (event) => {
+    finishTouchInteraction(event);
+  };
+
+  const handleTouchCancel = (event) => {
+    finishTouchInteraction(event);
+  };
+
   return (
-    <div style={{ padding: 12 }}>
-      <h3>Room : {id}</h3>
+    <div className="room-page">
+      <h3 className="room-title">Room : {id}</h3>
 
-      <div style={{ marginTop: 12, marginBottom: 12 }}>
-        <button onClick={toggleMic} style={{ marginRight: 8 }}>
+      <div className="room-toolbar">
+        <button onClick={toggleMic} disabled={!stream} className="btn btn-default">
           {audioEnabled ? "Mute Mic" : "Unmute Mic"}
         </button>
-        
-        {/* Only show camera toggle if we actually have video tracks */}
-        {stream.getVideoTracks().length > 0 && (
-           <button
-             onClick={toggleCamera}
-             disabled={isScreenSharing}
-             style={{
-               marginRight: 8,
-               opacity: isScreenSharing ? 0.6 : 1,
-               cursor: isScreenSharing ? "not-allowed" : "pointer",
-             }}
-           >
-             {isScreenSharing ? "Stop Sharing to Use Camera" : (videoEnabled ? "Turn Camera Off" : "Turn Camera On")}
-           </button>
+
+        {hasVideoTrack && (
+          <button onClick={toggleCamera} className="btn btn-default">
+            {videoEnabled ? "Turn Camera Off" : "Turn Camera On"}
+          </button>
         )}
 
-        <button
-          onClick={isScreenSharing ? stopScreenShare : startScreenShare}
-          disabled={!canShareScreen}
-          style={{
-            marginRight: 8,
-            background: isScreenSharing ? "#DD6B20" : "#2F855A",
-            color: "#fff",
-            opacity: canShareScreen ? 1 : 0.5,
-            cursor: canShareScreen ? "pointer" : "not-allowed",
-          }}
-          title={canShareScreen ? "" : "Join with video to enable screen sharing"}
-        >
-          {isScreenSharing ? "Stop Sharing" : "Share Screen"}
-        </button>
-
-        <button
-          onClick={() => endCall(id)}
-          style={{ background: "#E53E3E", color: "#fff", marginRight: 8 }}
-        >
+        <button onClick={() => endCall(id)} className="btn btn-danger">
           End Call
         </button>
 
         <button
           onClick={async () => {
-             // ... existing share logic
-             const url = window.location.href;
-             if (navigator.share) {
-               try { await navigator.share({ url }); } catch(e){}
-             } else {
-               navigator.clipboard.writeText(url);
-               alert("Link copied!");
-             }
+            const url = window.location.href;
+            if (navigator.share) {
+              try {
+                await navigator.share({ url });
+                return;
+              } catch {
+                // fall through to copy fallback
+              }
+            }
+
+            const copied = await copyTextFallback(url);
+            if (copied) {
+              alert("Link copied!");
+              return;
+            }
+
+            window.prompt("Copy this room link:", url);
           }}
-          style={{ background: "#3182CE", color: "#fff" }}
+          className="btn btn-primary"
         >
           Share Link
         </button>
       </div>
 
-      <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
-        {/* Local Feed */}
-        <div>
-          <h4>
-            You {stream.getVideoTracks().length === 0 && "(Audio Only)"}{" "}
-            {isScreenSharing && "(Sharing Screen)"}
+      <div className="remote-card">
+        <div className="remote-card-header">
+          <h4 className="remote-card-title">Full Remote Desktop (Host Agent)</h4>
+          <p className="remote-card-subtitle">
+            Request remote control from an available host agent.
+          </p>
+        </div>
+
+        <div className="remote-card-body">
+          {!remoteDesktopSession && (
+            <div className="remote-connect-row">
+              <button
+                onClick={connectRemoteDesktop}
+                disabled={!!remoteDesktopPendingRequest}
+                className="btn btn-primary remote-connect-btn"
+              >
+                {remoteDesktopPendingRequest ? "Waiting for Approval..." : "Request Remote Control"}
+              </button>
+              {remoteDesktopPendingRequest && (
+                <button onClick={stopRemoteDesktopSession} className="btn btn-danger remote-connect-btn">
+                  Cancel Request
+                </button>
+              )}
+            </div>
+          )}
+
+          {remoteDesktopSession && (
+            <div className="remote-status-row">
+              <div className="remote-host-label">Connected to host: {remoteDesktopSession.hostId}</div>
+              <button onClick={stopRemoteDesktopSession} className="btn btn-danger">
+                Disconnect Desktop
+              </button>
+            </div>
+          )}
+
+          {remoteDesktopError && <div className="error-text">{remoteDesktopError}</div>}
+          {incomingRemoteDesktopRequest && (
+            <div className="remote-status-row">
+              <div className="remote-host-label">
+                {incomingRemoteDesktopRequest.requesterId} requested remote control.
+              </div>
+              <button
+                onClick={() => respondToRemoteDesktopRequest(true)}
+                className="btn btn-primary"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => respondToRemoteDesktopRequest(false)}
+                className="btn btn-danger"
+              >
+                Reject
+              </button>
+            </div>
+          )}
+          {remoteDesktopPendingRequest && !remoteDesktopSession && (
+            <div className="muted-text">
+              Request sent to host {remoteDesktopPendingRequest.hostId}. Waiting for other participant approval.
+            </div>
+          )}
+
+          <div
+            ref={remoteSurfaceRef}
+            tabIndex={0}
+            onClick={(event) => {
+              if (!remoteDesktopSession) return;
+              setRemoteInputActive(true);
+              handleRemoteClick(event);
+            }}
+            onMouseMove={handleRemoteMove}
+            onMouseDown={handleRemoteMouseDown}
+            onMouseUp={handleRemoteMouseUp}
+            onWheel={handleRemoteWheel}
+            onTouchStart={handleTouchStart}
+            onTouchMove={handleTouchMove}
+            onTouchEnd={handleTouchEnd}
+            onTouchCancel={handleTouchCancel}
+            onContextMenu={(event) => event.preventDefault()}
+            className={`remote-surface ${isControlActive ? "remote-surface--active" : ""}`}
+          >
+            {remoteDesktopFrame ? (
+              <img
+                src={remoteDesktopFrame}
+                alt="Remote desktop"
+                className={`remote-surface-frame ${
+                  isControlActive ? "remote-surface-frame--active" : ""
+                }`}
+                draggable={false}
+              />
+            ) : (
+              <div className="remote-surface-empty">
+                <div className="remote-surface-empty-title">
+                  {remoteDesktopSession ? "Waiting for host frames..." : "No active desktop session"}
+                </div>
+                <div className="remote-surface-empty-subtitle">
+                  Click the panel after connect to start keyboard and mouse control.
+                </div>
+              </div>
+            )}
+
+            {remoteDesktopSession && (
+              <div className="remote-surface-badge">
+                {isControlActive ? "Control Active (Esc to release)" : "Click to Control"}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="feeds-layout">
+        <div className="feed-section">
+          <h4 className="feed-title">
+            You {!stream && "(No Media)"} {stream && !hasVideoTrack && "(Audio Only)"}
           </h4>
           <UserFeedPlayer stream={stream} muted={true} isLocal />
         </div>
 
-        {/* Remote Feeds */}
-        <div>
-          <h4>Participants</h4>
-          <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+        <div className="feed-section">
+          <h4 className="feed-title">Participants</h4>
+          <div className="participants-grid">
             {Object.keys(peers).length === 0 && (
-              <div style={{ color: "#666" }}>No other participants</div>
+              <div className="muted-text">No other participants</div>
             )}
+
             {Object.keys(peers).map((peerId) => (
-              <UserFeedPlayer
-                key={peerId}
-                stream={peers[peerId].stream}
-                muted={false}
-              />
+              <div key={peerId} className="participant-card">
+                <UserFeedPlayer stream={peers[peerId].stream} muted={false} />
+              </div>
             ))}
           </div>
         </div>

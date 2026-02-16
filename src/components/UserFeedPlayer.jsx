@@ -1,6 +1,5 @@
 import { useEffect, useRef } from "react";
 
-
 const UserFeedPlayer = ({ stream, muted = false, isLocal = false }) => {
   const videoRef = useRef(null);
 
@@ -11,7 +10,7 @@ const UserFeedPlayer = ({ stream, muted = false, isLocal = false }) => {
     if (stream) {
       try {
         el.srcObject = stream;
-      } catch (err) {
+      } catch {
         el.src = window.URL.createObjectURL(stream);
       }
 
@@ -19,55 +18,34 @@ const UserFeedPlayer = ({ stream, muted = false, isLocal = false }) => {
       el.playsInline = true;
       el.autoplay = true;
 
-      el.play().catch(err => {
+      el.play().catch((err) => {
+        if (err?.name === "AbortError") return;
         console.warn("play() failed on video/audio element:", err);
       });
     } else {
-      // clear
       try {
         el.srcObject = null;
         el.src = "";
-      } catch (e) {}
+      } catch {
+        // noop
+      }
     }
   }, [stream, muted, isLocal]);
 
-  const hasVideo = stream && 
-    stream.getVideoTracks().length > 0 && 
-    stream.getVideoTracks().some(track => track.enabled);
+  const hasVideo =
+    stream &&
+    stream.getVideoTracks().length > 0 &&
+    stream.getVideoTracks().some((track) => track.enabled);
 
   return (
-    <div style={{ 
-      display: "flex", 
-      flexDirection: "column", 
-      alignItems: "center",
-      position: "relative" 
-    }}>
+    <div className="user-feed">
       <video
         ref={videoRef}
-        style={{
-          width: 320,
-          height: 200,
-          background: "#000",
-          objectFit: "cover",
-          borderRadius: 6,
-          opacity: hasVideo ? 1 : 0.5 
-        }}
+        className={`user-feed-video ${hasVideo ? "" : "user-feed-video--audio-only"}`}
       />
 
       {!hasVideo && (
-        <div style={{
-          position: "absolute",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          color: "white",
-          fontWeight: "bold",
-          zIndex: 10
-        }}>
+        <div className="user-feed-audio-overlay">
           <span>Audio Only</span>
         </div>
       )}

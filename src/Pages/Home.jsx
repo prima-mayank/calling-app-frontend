@@ -1,6 +1,6 @@
-
+﻿
 import { useContext } from "react";
-import { SocketContext } from "../Context/SocketContext";
+import { SocketContext } from "../Context/socketContextValue";
 
 const Home = () => {
   const { socket, provideStream } = useContext(SocketContext);
@@ -13,31 +13,34 @@ const Home = () => {
     }
   };
 
+  const startRemoteOnly = () => {
+    socket.emit("create-room");
+  };
+
   return (
-    <div style={{ 
-      height: "100vh", 
-      display: "flex", 
-      flexDirection: "column",
-      justifyContent: "center", 
-      alignItems: "center",
-      gap: "20px" 
-    }}>
-      <h1>Video/Audio Meeting App</h1>
-      
-      <div style={{ display: "flex", gap: "20px" }}>
-        <button 
+    <div className="home-page">
+      <h1 className="home-title">Video/Audio Meeting App</h1>
+
+      <div className="home-actions">
+        <button
           onClick={() => startCall(true)}
-          style={{ padding: "15px 30px", fontSize: "1.2rem", cursor: "pointer", background: "#3182CE", color: "white"}}
+          className="btn btn-call-video home-action-btn"
         >
           Start Video Call
         </button>
 
-        {/* Option 2: Audio Only Call */}
-        <button 
+        <button
           onClick={() => startCall(false)}
-          style={{ padding: "15px 30px", fontSize: "1.2rem", cursor: "pointer", background: "#48BB78", color: "white"}}
+          className="btn btn-call-audio home-action-btn"
         >
           Start Audio Call
+        </button>
+
+        <button
+          onClick={startRemoteOnly}
+          className="btn btn-default home-action-btn"
+        >
+          Start Remote Only
         </button>
       </div>
     </div>
