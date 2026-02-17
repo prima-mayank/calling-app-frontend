@@ -10,6 +10,12 @@ import { SocketContext } from "./socketContextValue";
 
 const WS_SERVER = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
 const REMOTE_CONTROL_TOKEN = import.meta.env.VITE_REMOTE_CONTROL_TOKEN || "";
+const HOST_APP_DOWNLOAD_URL = import.meta.env.VITE_HOST_APP_DOWNLOAD_URL || "";
+const HOST_APP_REQUIRED_ERROR_CODES = new Set([
+  "host-not-resolved",
+  "host-not-found",
+  "host-offline",
+]);
 
 const parsePort = (value) => {
   const port = Number(value);
@@ -58,7 +64,7 @@ const buildPeerConnectionConfig = () => {
 const socket = SocketIoClient(WS_SERVER, {
   auth: REMOTE_CONTROL_TOKEN ? { token: REMOTE_CONTROL_TOKEN } : undefined,
   withCredentials: false,
-  transports: ["websocket", "polling"],
+  transports: ["polling", "websocket"],
 });
 
 export const SocketProvider = ({ children }) => {
@@ -82,6 +88,8 @@ export const SocketProvider = ({ children }) => {
   const [incomingRemoteDesktopRequest, setIncomingRemoteDesktopRequest] = useState(null);
   const [remoteDesktopFrame, setRemoteDesktopFrame] = useState(null);
   const [remoteDesktopError, setRemoteDesktopError] = useState("");
+  const [hostAppInstallPrompt, setHostAppInstallPrompt] = useState(null);
+  const [socketConnected, setSocketConnected] = useState(socket.connected);
 
   useEffect(() => {
     userRef.current = user;
@@ -90,6 +98,19 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     streamRef.current = stream;
   }, [stream]);
+
+  useEffect(() => {
+    const onConnect = () => setSocketConnected(true);
+    const onDisconnect = () => setSocketConnected(false);
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+    };
+  }, []);
 
   const provideStream = async (isVideoCall = true) => {
     const mediaApiMissing = !navigator.mediaDevices?.getUserMedia;
@@ -179,6 +200,7 @@ export const SocketProvider = ({ children }) => {
   const requestRemoteDesktopSession = () => {
     setRemoteDesktopError("");
     setRemoteDesktopPendingRequest(null);
+    setHostAppInstallPrompt(null);
     socket.emit("remote-session-request");
   };
 
@@ -194,7 +216,12 @@ export const SocketProvider = ({ children }) => {
       socket.emit("remote-session-stop");
       setRemoteDesktopPendingRequest(null);
       setRemoteDesktopError("");
+      setHostAppInstallPrompt(null);
     }
+  };
+
+  const dismissHostAppInstallPrompt = () => {
+    setHostAppInstallPrompt(null);
   };
 
   const respondToRemoteDesktopRequest = (accepted) => {
@@ -256,6 +283,7 @@ export const SocketProvider = ({ children }) => {
       if (!requestId) return;
       setRemoteDesktopPendingRequest({ requestId, hostId });
       setRemoteDesktopError("");
+      setHostAppInstallPrompt(null);
     };
 
     const onRemoteSessionRequestedUi = ({ requestId, requesterId }) => {
@@ -273,6 +301,7 @@ export const SocketProvider = ({ children }) => {
       setRemoteDesktopPendingRequest(null);
       setRemoteDesktopFrame(null);
       setRemoteDesktopError("");
+      setHostAppInstallPrompt(null);
     };
 
     const onRemoteSessionEnded = ({ sessionId }) => {
@@ -289,6 +318,7 @@ export const SocketProvider = ({ children }) => {
       setRemoteDesktopPendingRequest(null);
       setIncomingRemoteDesktopRequest(null);
       setRemoteDesktopFrame(null);
+      setHostAppInstallPrompt(null);
     };
 
     const onRemoteFrame = ({ sessionId, image }) => {
@@ -297,7 +327,7 @@ export const SocketProvider = ({ children }) => {
       setRemoteDesktopFrame(`data:image/jpeg;base64,${image}`);
     };
 
-    const onRemoteSessionError = ({ message }) => {
+    const onRemoteSessionError = ({ message, code }) => {
       const normalizedMessage =
         typeof message === "string" && message.trim()
           ? message.trim()
@@ -305,6 +335,16 @@ export const SocketProvider = ({ children }) => {
       setRemoteDesktopError(normalizedMessage);
       setRemoteDesktopPendingRequest(null);
       setIncomingRemoteDesktopRequest(null);
+
+      if (HOST_APP_REQUIRED_ERROR_CODES.has(String(code || "").trim())) {
+        setHostAppInstallPrompt({
+          message: normalizedMessage,
+          downloadUrl: HOST_APP_DOWNLOAD_URL,
+        });
+        return;
+      }
+
+      setHostAppInstallPrompt(null);
       alert(normalizedMessage);
     };
 
@@ -314,6 +354,7 @@ export const SocketProvider = ({ children }) => {
       setRemoteDesktopPendingRequest(null);
       setIncomingRemoteDesktopRequest(null);
       setRemoteDesktopFrame(null);
+      setHostAppInstallPrompt(null);
     };
 
     socket.on("room-created", enterRoom);
@@ -469,11 +510,14 @@ export const SocketProvider = ({ children }) => {
         incomingRemoteDesktopRequest,
         remoteDesktopFrame,
         remoteDesktopError,
+        hostAppInstallPrompt,
+        socketConnected,
         provideStream,
         toggleMic,
         toggleCamera,
         requestRemoteDesktopSession,
         stopRemoteDesktopSession,
+        dismissHostAppInstallPrompt,
         respondToRemoteDesktopRequest,
         sendRemoteDesktopInput,
         endCall,

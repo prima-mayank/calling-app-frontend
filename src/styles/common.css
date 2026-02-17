@@ -184,6 +184,32 @@
   margin-bottom: 10px;
 }
 
+.host-app-prompt {
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #f6ad55;
+  background: #fffaf0;
+}
+
+.host-app-prompt-title {
+  font-weight: 700;
+  color: #7b341e;
+  margin-bottom: 6px;
+}
+
+.host-app-prompt-text {
+  color: #7b341e;
+  font-size: 0.92rem;
+}
+
+.host-app-prompt-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .remote-surface {
   width: 100%;
   max-width: 1100px;

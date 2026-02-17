@@ -51,11 +51,13 @@ const Room = () => {
     incomingRemoteDesktopRequest,
     remoteDesktopFrame,
     remoteDesktopError,
+    hostAppInstallPrompt,
     provideStream,
     toggleMic,
     toggleCamera,
     requestRemoteDesktopSession,
     stopRemoteDesktopSession,
+    dismissHostAppInstallPrompt,
     respondToRemoteDesktopRequest,
     sendRemoteDesktopInput,
     endCall,
@@ -65,6 +67,7 @@ const Room = () => {
   const [remoteInputActive, setRemoteInputActive] = useState(false);
   const moveThrottleRef = useRef(0);
   const remoteSurfaceRef = useRef(null);
+  const remoteFrameRef = useRef(null);
   const touchStateRef = useRef({
     active: false,
     moved: false,
@@ -163,18 +166,21 @@ const Room = () => {
   }
 
   const buildPointerPayloadFromClient = (clientX, clientY) => {
+    const frame = remoteFrameRef.current;
     const surface = remoteSurfaceRef.current;
-    if (!surface) return null;
+    const targetElement = frame || surface;
+    if (!targetElement) return null;
 
-    const rect = surface.getBoundingClientRect();
+    const rect = targetElement.getBoundingClientRect();
     if (!rect.width || !rect.height) return null;
 
     const x = (clientX - rect.left) / rect.width;
     const y = (clientY - rect.top) / rect.height;
+    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
 
     return {
-      x: Math.min(1, Math.max(0, x)),
-      y: Math.min(1, Math.max(0, y)),
+      x,
+      y,
     };
   };
 
@@ -443,6 +449,38 @@ const Room = () => {
           )}
 
           {remoteDesktopError && <div className="error-text">{remoteDesktopError}</div>}
+          {hostAppInstallPrompt && (
+            <div className="host-app-prompt">
+              <div className="host-app-prompt-title">Host App Required</div>
+              <div className="host-app-prompt-text">
+                {hostAppInstallPrompt.message}
+              </div>
+              <div className="host-app-prompt-text">
+                Ask the other user to install and run the host app, then retry.
+              </div>
+              <div className="host-app-prompt-actions">
+                {!!hostAppInstallPrompt.downloadUrl && (
+                  <button
+                    onClick={() =>
+                      window.open(hostAppInstallPrompt.downloadUrl, "_blank", "noopener,noreferrer")
+                    }
+                    className="btn btn-primary"
+                  >
+                    Download Host App
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    dismissHostAppInstallPrompt();
+                    requestRemoteDesktopSession();
+                  }}
+                  className="btn btn-default"
+                >
+                  Retry Request
+                </button>
+              </div>
+            </div>
+          )}
           {incomingRemoteDesktopRequest && (
             <div className="remote-status-row">
               <div className="remote-host-label">
@@ -489,6 +527,7 @@ const Room = () => {
           >
             {remoteDesktopFrame ? (
               <img
+                ref={remoteFrameRef}
                 src={remoteDesktopFrame}
                 alt="Remote desktop"
                 className={`remote-surface-frame ${

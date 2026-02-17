@@ -3,17 +3,29 @@ import { useContext } from "react";
 import { SocketContext } from "../Context/socketContextValue";
 
 const Home = () => {
-  const { socket, provideStream } = useContext(SocketContext);
+  const { socket, provideStream, socketConnected } = useContext(SocketContext);
 
   const startCall = async (isVideo) => {
-    const stream = await provideStream(isVideo);
-    
-    if (stream) {
-      socket.emit("create-room");
+    if (!socketConnected) {
+      alert("Backend is not connected yet. Check VITE_SOCKET_URL and retry.");
+      return;
     }
+
+    const stream = await provideStream(isVideo);
+    if (!stream) {
+      alert("Camera/mic unavailable or blocked. Allow permissions, or use Start Remote Only.");
+      return;
+    }
+
+    socket.emit("create-room");
   };
 
   const startRemoteOnly = () => {
+    if (!socketConnected) {
+      alert("Backend is not connected yet. Check VITE_SOCKET_URL and retry.");
+      return;
+    }
+
     socket.emit("create-room");
   };
 
