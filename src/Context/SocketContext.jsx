@@ -9,6 +9,7 @@ import { addPeerAction, removePeerAction } from "../Actions/peerAction";
 import { SocketContext } from "./socketContextValue";
 
 const WS_SERVER = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
+const REMOTE_CONTROL_TOKEN = import.meta.env.VITE_REMOTE_CONTROL_TOKEN || "";
 
 const parsePort = (value) => {
   const port = Number(value);
@@ -55,9 +56,9 @@ const buildPeerConnectionConfig = () => {
 };
 
 const socket = SocketIoClient(WS_SERVER, {
+  auth: REMOTE_CONTROL_TOKEN ? { token: REMOTE_CONTROL_TOKEN } : undefined,
   withCredentials: false,
-  transports: ["polling"],
-  upgrade: false,
+  transports: ["websocket", "polling"],
 });
 
 export const SocketProvider = ({ children }) => {
