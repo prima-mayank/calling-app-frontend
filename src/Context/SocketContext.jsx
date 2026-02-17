@@ -17,6 +17,11 @@ const HOST_APP_REQUIRED_ERROR_CODES = new Set([
   "host-offline",
 ]);
 
+const shouldInitiateCall = (localPeerId, remotePeerId) => {
+  if (!localPeerId || !remotePeerId) return false;
+  return localPeerId.localeCompare(remotePeerId) < 0;
+};
+
 const parsePort = (value) => {
   const port = Number(value);
   if (!Number.isFinite(port) || port <= 0) return null;
@@ -157,7 +162,17 @@ export const SocketProvider = ({ children }) => {
   };
 
   const setupCallHandlers = useCallback((call, peerId) => {
-    if (!call) return;
+    if (!call || !peerId) return;
+
+    const existingCall = callsRef.current[peerId];
+    if (existingCall && existingCall !== call) {
+      try {
+        existingCall.close();
+      } catch {
+        // noop
+      }
+    }
+
     callsRef.current[peerId] = call;
 
     call.on("stream", (remoteStream) => {
@@ -165,6 +180,7 @@ export const SocketProvider = ({ children }) => {
     });
 
     call.on("close", () => {
+      if (callsRef.current[peerId] !== call) return;
       dispatch(removePeerAction(peerId));
       delete callsRef.current[peerId];
     });
@@ -184,10 +200,10 @@ export const SocketProvider = ({ children }) => {
     if (localUser && localStream) {
       uniqueParticipants.forEach((pid) => {
         if (pid === localUser.id) return;
+        if (!shouldInitiateCall(localUser.id, pid)) return;
         if (!callsRef.current[pid]) {
           const call = localUser.call(pid, localStream);
           setupCallHandlers(call, pid);
-          callsRef.current[pid] = call;
         }
       });
     } else {
@@ -394,6 +410,7 @@ export const SocketProvider = ({ children }) => {
 
     const onUserJoined = ({ peerId }) => {
       if (!peerId || peerId === user.id) return;
+      if (!shouldInitiateCall(user.id, peerId)) return;
       if (!callsRef.current[peerId]) {
         const call = user.call(peerId, stream);
         setupCallHandlers(call, peerId);
@@ -405,6 +422,7 @@ export const SocketProvider = ({ children }) => {
     if (pendingParticipantsRef.current.length > 0) {
       pendingParticipantsRef.current.forEach((pid) => {
         if (pid === user.id) return;
+        if (!shouldInitiateCall(user.id, pid)) return;
         if (!callsRef.current[pid]) {
           const call = user.call(pid, stream);
           setupCallHandlers(call, pid);

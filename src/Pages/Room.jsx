@@ -9,8 +9,9 @@ const mapMouseButton = (button) => {
   return "left";
 };
 
-const MOVE_EVENT_THROTTLE_MS = 35;
+const MOVE_EVENT_THROTTLE_MS = 20;
 const TOUCH_TAP_MAX_MOVE = 0.015;
+const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
 const copyTextFallback = async (text) => {
   if (navigator.clipboard?.writeText) {
@@ -110,9 +111,32 @@ const Room = () => {
       return tag === "input" || tag === "textarea" || tag === "select";
     };
 
+    const releaseModifierKeys = () => {
+      const modifierReleases = [
+        { key: "Shift", code: "ShiftLeft" },
+        { key: "Shift", code: "ShiftRight" },
+        { key: "Control", code: "ControlLeft" },
+        { key: "Control", code: "ControlRight" },
+        { key: "Alt", code: "AltLeft" },
+        { key: "Alt", code: "AltRight" },
+        { key: "Meta", code: "MetaLeft" },
+        { key: "Meta", code: "MetaRight" },
+      ];
+
+      modifierReleases.forEach((modifier) => {
+        sendRemoteDesktopInput({
+          type: "key-up",
+          key: modifier.key,
+          code: modifier.code,
+        });
+      });
+    };
+
     const onKeyDown = (event) => {
       if (isTypingTarget(event.target)) return;
       if (event.key === "Escape") {
+        event.preventDefault();
+        releaseModifierKeys();
         setRemoteInputActive(false);
         return;
       }
@@ -136,12 +160,27 @@ const Room = () => {
       });
     };
 
+    const onWindowBlur = () => {
+      releaseModifierKeys();
+    };
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "hidden") {
+        releaseModifierKeys();
+      }
+    };
+
     window.addEventListener("keydown", onKeyDown);
     window.addEventListener("keyup", onKeyUp);
+    window.addEventListener("blur", onWindowBlur);
+    document.addEventListener("visibilitychange", onVisibilityChange);
 
     return () => {
+      releaseModifierKeys();
       window.removeEventListener("keydown", onKeyDown);
       window.removeEventListener("keyup", onKeyUp);
+      window.removeEventListener("blur", onWindowBlur);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [remoteInputActive, remoteDesktopSession, sendRemoteDesktopInput]);
 
@@ -168,20 +207,66 @@ const Room = () => {
   const buildPointerPayloadFromClient = (clientX, clientY) => {
     const frame = remoteFrameRef.current;
     const surface = remoteSurfaceRef.current;
-    const targetElement = frame || surface;
-    if (!targetElement) return null;
+    if (!surface) return null;
 
-    const rect = targetElement.getBoundingClientRect();
-    if (!rect.width || !rect.height) return null;
+    const surfaceRect = surface.getBoundingClientRect();
+    if (!surfaceRect.width || !surfaceRect.height) return null;
 
-    const x = (clientX - rect.left) / rect.width;
-    const y = (clientY - rect.top) / rect.height;
-    if (x < 0 || x > 1 || y < 0 || y > 1) return null;
+    if (
+      clientX < surfaceRect.left ||
+      clientX > surfaceRect.left + surfaceRect.width ||
+      clientY < surfaceRect.top ||
+      clientY > surfaceRect.top + surfaceRect.height
+    ) {
+      return null;
+    }
 
-    return {
-      x,
-      y,
-    };
+    let activeRect = surfaceRect;
+
+    if (frame) {
+      const frameRect = frame.getBoundingClientRect();
+      const naturalWidth = Number(frame.naturalWidth);
+      const naturalHeight = Number(frame.naturalHeight);
+
+      if (
+        frameRect.width > 0 &&
+        frameRect.height > 0 &&
+        Number.isFinite(naturalWidth) &&
+        Number.isFinite(naturalHeight) &&
+        naturalWidth > 0 &&
+        naturalHeight > 0
+      ) {
+        const frameRatio = frameRect.width / frameRect.height;
+        const imageRatio = naturalWidth / naturalHeight;
+
+        let width = frameRect.width;
+        let height = frameRect.height;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (frameRatio > imageRatio) {
+          height = frameRect.height;
+          width = height * imageRatio;
+          offsetX = (frameRect.width - width) / 2;
+        } else if (frameRatio < imageRatio) {
+          width = frameRect.width;
+          height = width / imageRatio;
+          offsetY = (frameRect.height - height) / 2;
+        }
+
+        activeRect = {
+          left: frameRect.left + offsetX,
+          top: frameRect.top + offsetY,
+          width,
+          height,
+        };
+      }
+    }
+
+    const x = clamp01((clientX - activeRect.left) / activeRect.width);
+    const y = clamp01((clientY - activeRect.top) / activeRect.height);
+
+    return { x, y };
   };
 
   const buildPointerPayload = (event) =>
