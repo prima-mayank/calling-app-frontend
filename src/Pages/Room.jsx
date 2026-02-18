@@ -78,6 +78,7 @@ const Room = () => {
     startY: 0,
   });
   const ignoreNextClickRef = useRef(false);
+  const joinedRoomIdRef = useRef("");
 
   const handleJoinRoom = async (mode) => {
     if (mode === "none") {
@@ -91,13 +92,17 @@ const Room = () => {
   };
 
   useEffect(() => {
-    if (user && id && hasJoined) {
-      socket.emit("joined-room", {
-        roomId: id,
-        peerId: user.id,
-      });
-    }
-  }, [id, user, hasJoined, socket]);
+    // Join the Socket.IO room as early as possible so the room exists/has identity
+    // even before the user chooses audio/video/none. WebRTC calls will wait for stream.
+    if (!user || !id) return;
+    if (joinedRoomIdRef.current === id) return;
+
+    joinedRoomIdRef.current = id;
+    socket.emit("joined-room", {
+      roomId: id,
+      peerId: user.id,
+    });
+  }, [id, user, socket]);
 
   useEffect(() => {
     const isControlActive = remoteInputActive && !!remoteDesktopSession;

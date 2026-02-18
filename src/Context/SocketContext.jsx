@@ -8,9 +8,14 @@ import { peerReducer } from "../Reducers/peerReducer";
 import { addPeerAction, removePeerAction } from "../Actions/peerAction";
 import { SocketContext } from "./socketContextValue";
 
-const WS_SERVER = import.meta.env.VITE_SOCKET_URL || "http://localhost:5000";
+const WS_SERVER =
+  import.meta.env.VITE_SOCKET_URL ||
+  (import.meta.env.DEV && "http://localhost:5000") ||
+  "https://calling-app-backend-1.onrender.com";
 const REMOTE_CONTROL_TOKEN = import.meta.env.VITE_REMOTE_CONTROL_TOKEN || "";
-const HOST_APP_DOWNLOAD_URL = import.meta.env.VITE_HOST_APP_DOWNLOAD_URL || "";
+const HOST_APP_DOWNLOAD_URL =
+  import.meta.env.VITE_HOST_APP_DOWNLOAD_URL ||
+  "https://github.com/prima-mayank/remote-agent/releases/latest/download/host-app-win.zip";
 const HOST_APP_REQUIRED_ERROR_CODES = new Set([
   "host-not-resolved",
   "host-not-found",
@@ -69,7 +74,13 @@ const buildPeerConnectionConfig = () => {
 const socket = SocketIoClient(WS_SERVER, {
   auth: REMOTE_CONTROL_TOKEN ? { token: REMOTE_CONTROL_TOKEN } : undefined,
   withCredentials: false,
+  // Some hosts (incl. some Render setups) may not reliably support WebSocket upgrade.
+  // Keep polling enabled so the app can connect, and upgrade when possible.
   transports: ["polling", "websocket"],
+  upgrade: true,
+  rememberUpgrade: true,
+  timeout: 20000,
+  reconnectionAttempts: 10,
 });
 
 export const SocketProvider = ({ children }) => {
@@ -107,13 +118,19 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     const onConnect = () => setSocketConnected(true);
     const onDisconnect = () => setSocketConnected(false);
+    const onConnectError = (err) => {
+      console.warn("socket connect_error:", err?.message || err);
+      setSocketConnected(false);
+    };
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onConnectError);
 
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onConnectError);
     };
   }, []);
 
