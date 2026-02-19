@@ -95,9 +95,12 @@ export const SocketProvider = ({ children }) => {
   const remoteSessionIdRef = useRef(null);
   const userRef = useRef(user);
   const streamRef = useRef(stream);
+  const screenShareTrackRef = useRef(null);
+  const cameraTrackBeforeShareRef = useRef(null);
 
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
 
   const [remoteDesktopSession, setRemoteDesktopSession] = useState(null);
   const [remoteDesktopPendingRequest, setRemoteDesktopPendingRequest] = useState(null);
@@ -207,6 +210,22 @@ export const SocketProvider = ({ children }) => {
     });
   }, []);
 
+  const replaceOutgoingVideoTrack = useCallback(async (nextTrack) => {
+    const calls = Object.values(callsRef.current);
+    await Promise.all(
+      calls.map(async (call) => {
+        const senders = call?.peerConnection?.getSenders?.() || [];
+        const videoSender = senders.find((sender) => sender?.track?.kind === "video");
+        if (!videoSender) return;
+        try {
+          await videoSender.replaceTrack(nextTrack || null);
+        } catch (err) {
+          console.warn("replaceTrack failed:", err);
+        }
+      })
+    );
+  }, []);
+
   const fetchParticipantList = useCallback(({ participants }) => {
     if (!participants || participants.length === 0) return;
 
@@ -294,6 +313,84 @@ export const SocketProvider = ({ children }) => {
       event: normalizedEvent,
     });
   };
+
+  const stopScreenShare = useCallback(async () => {
+    const activeShareTrack = screenShareTrackRef.current;
+    const previousCameraTrack = cameraTrackBeforeShareRef.current;
+
+    if (!activeShareTrack && !isScreenSharing) return;
+
+    screenShareTrackRef.current = null;
+    cameraTrackBeforeShareRef.current = null;
+    setIsScreenSharing(false);
+
+    const restoredCameraTrack =
+      previousCameraTrack && previousCameraTrack.readyState === "live"
+        ? previousCameraTrack
+        : null;
+
+    await replaceOutgoingVideoTrack(restoredCameraTrack);
+
+    const currentStream = streamRef.current;
+    const audioTracks = currentStream ? currentStream.getAudioTracks() : [];
+    const nextTracks = [...audioTracks];
+    if (restoredCameraTrack) {
+      nextTracks.push(restoredCameraTrack);
+    }
+
+    setStream(nextTracks.length > 0 ? new MediaStream(nextTracks) : null);
+    setVideoEnabled(!!restoredCameraTrack && restoredCameraTrack.enabled);
+
+    if (activeShareTrack && activeShareTrack.readyState === "live") {
+      activeShareTrack.stop();
+    }
+  }, [isScreenSharing, replaceOutgoingVideoTrack]);
+
+  const startScreenShare = useCallback(async () => {
+    if (isScreenSharing) return;
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      alert("Screen sharing is not supported in this browser.");
+      return;
+    }
+
+    const currentStream = streamRef.current;
+    const currentCameraTrack = currentStream?.getVideoTracks?.()[0] || null;
+    if (!currentStream || !currentCameraTrack) {
+      alert("Join with video first to start screen sharing.");
+      return;
+    }
+
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: false,
+      });
+      const displayTrack = displayStream.getVideoTracks?.()[0] || null;
+      if (!displayTrack) return;
+
+      cameraTrackBeforeShareRef.current = currentCameraTrack;
+      screenShareTrackRef.current = displayTrack;
+
+      await replaceOutgoingVideoTrack(displayTrack);
+
+      const nextTracks = [...currentStream.getAudioTracks(), displayTrack];
+      setStream(new MediaStream(nextTracks));
+      setVideoEnabled(true);
+      setIsScreenSharing(true);
+
+      displayTrack.addEventListener(
+        "ended",
+        () => {
+          void stopScreenShare();
+        },
+        { once: true }
+      );
+    } catch (err) {
+      if (err?.name === "NotAllowedError") return;
+      console.error("getDisplayMedia failed:", err);
+      alert("Failed to start screen sharing.");
+    }
+  }, [isScreenSharing, replaceOutgoingVideoTrack, stopScreenShare]);
 
   useEffect(() => {
     const enterRoom = ({ roomId }) => {
@@ -471,6 +568,10 @@ export const SocketProvider = ({ children }) => {
 
   const toggleCamera = () => {
     if (!stream) return;
+    if (isScreenSharing) {
+      console.warn("Camera toggle is disabled while screen sharing is active.");
+      return;
+    }
 
     const videoTracks = stream.getVideoTracks();
     if (videoTracks.length === 0) {
@@ -514,6 +615,17 @@ export const SocketProvider = ({ children }) => {
     remoteSessionIdRef.current = null;
     setRemoteDesktopFrame(null);
     setRemoteDesktopError("");
+    setIsScreenSharing(false);
+
+    if (screenShareTrackRef.current) {
+      try {
+        screenShareTrackRef.current.stop();
+      } catch {
+        // noop
+      }
+      screenShareTrackRef.current = null;
+    }
+    cameraTrackBeforeShareRef.current = null;
 
     Object.keys(peers).forEach((pid) => {
       dispatch(removePeerAction(pid));
@@ -550,6 +662,9 @@ export const SocketProvider = ({ children }) => {
         provideStream,
         toggleMic,
         toggleCamera,
+        isScreenSharing,
+        startScreenShare,
+        stopScreenShare,
         requestRemoteDesktopSession,
         stopRemoteDesktopSession,
         dismissHostAppInstallPrompt,

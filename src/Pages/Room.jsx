@@ -47,6 +47,7 @@ const Room = () => {
     peers,
     audioEnabled,
     videoEnabled,
+    isScreenSharing,
     remoteDesktopSession,
     remoteDesktopPendingRequest,
     incomingRemoteDesktopRequest,
@@ -56,6 +57,8 @@ const Room = () => {
     provideStream,
     toggleMic,
     toggleCamera,
+    startScreenShare,
+    stopScreenShare,
     requestRemoteDesktopSession,
     stopRemoteDesktopSession,
     dismissHostAppInstallPrompt,
@@ -470,6 +473,18 @@ const Room = () => {
         {hasVideoTrack && (
           <button onClick={toggleCamera} className="btn btn-default">
             {videoEnabled ? "Turn Camera Off" : "Turn Camera On"}
+          </button>
+        )}
+
+        {hasVideoTrack && !isScreenSharing && (
+          <button onClick={startScreenShare} className="btn btn-primary">
+            Share Screen
+          </button>
+        )}
+
+        {isScreenSharing && (
+          <button onClick={stopScreenShare} className="btn btn-danger">
+            Stop Sharing
           </button>
         )}
 
