@@ -22,6 +22,7 @@ const HOST_APP_REQUIRED_ERROR_CODES = new Set([
   "host-offline",
   "host-owner-unclaimed",
 ]);
+const REMOTE_DEBUG_ENABLED = String(import.meta.env.VITE_REMOTE_DEBUG || "").trim() === "1";
 
 const buildHostAppLaunchUrl = (hostId = "") => {
   if (!HOST_APP_PROTOCOL_URL) return "";
@@ -115,6 +116,7 @@ export const SocketProvider = ({ children }) => {
   const autoClaimRemoteHostIdRef = useRef("");
   const autoRequestRemoteHostIdRef = useRef("");
   const remoteDesktopPendingRequestRef = useRef(null);
+  const remoteInputDebugRef = useRef({ count: 0, lastLoggedAt: 0 });
   const screenShareTrackRef = useRef(null);
   const cameraTrackBeforeShareRef = useRef(null);
 
@@ -138,7 +140,15 @@ export const SocketProvider = ({ children }) => {
   const [hostAppInstallPrompt, setHostAppInstallPrompt] = useState(null);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
 
-  const logRemote = () => {};
+  const logRemote = (eventName, payload = undefined) => {
+    if (!REMOTE_DEBUG_ENABLED) return;
+    const normalizedEventName = String(eventName || "").trim() || "event";
+    if (typeof payload === "undefined") {
+      console.debug(`[remote-ui] ${normalizedEventName}`);
+      return;
+    }
+    console.debug(`[remote-ui] ${normalizedEventName}`, payload);
+  };
 
   useEffect(() => {
     userRef.current = user;
@@ -421,6 +431,20 @@ export const SocketProvider = ({ children }) => {
       sessionId: remoteDesktopSession.sessionId,
       event: normalizedEvent,
     });
+
+    if (REMOTE_DEBUG_ENABLED) {
+      const now = Date.now();
+      const debugState = remoteInputDebugRef.current;
+      debugState.count += 1;
+      if (now - debugState.lastLoggedAt >= 1500) {
+        logRemote("input-sent", {
+          sessionId: remoteDesktopSession.sessionId,
+          count: debugState.count,
+          lastType: type,
+        });
+        debugState.lastLoggedAt = now;
+      }
+    }
   };
 
   const stopScreenShare = useCallback(async () => {
@@ -598,10 +622,23 @@ export const SocketProvider = ({ children }) => {
     const onRemoteHostsList = ({ hosts }) => {
       const normalizedHosts = Array.isArray(hosts)
         ? hosts
-            .map((item) => ({
-              hostId: String(item?.hostId || "").trim(),
-              busy: !!item?.busy,
-            }))
+            .map((item) => {
+              const hostId = String(item?.hostId || "").trim();
+              const ownershipRaw = String(item?.ownership || "").trim().toLowerCase();
+              const ownership =
+                ownershipRaw === "you"
+                  ? "you"
+                  : ownershipRaw === "other"
+                  ? "other"
+                  : hostId && hostId === String(claimedRemoteHostIdRef.current || "").trim()
+                  ? "you"
+                  : "unclaimed";
+              return {
+                hostId,
+                busy: !!item?.busy,
+                ownership,
+              };
+            })
             .filter((item) => !!item.hostId)
         : [];
       setRemoteHosts(normalizedHosts);

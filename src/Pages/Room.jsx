@@ -14,6 +14,11 @@ const TOUCH_TAP_MAX_MOVE = 0.015;
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const HOME_JOIN_PREF_KEY = "home_join_pref_v1";
 const HOME_JOIN_PREF_MAX_AGE_MS = 5 * 60 * 1000;
+const getHostOwnershipLabel = (ownership) => {
+  if (ownership === "you") return "You";
+  if (ownership === "other") return "Other";
+  return "Unclaimed";
+};
 
 const copyTextFallback = async (text) => {
   if (navigator.clipboard?.writeText) {
@@ -433,6 +438,18 @@ const Room = () => {
       alert("Select a host first.");
       return;
     }
+    if (selectedRemoteHostOwnership === "you") {
+      alert("This host is claimed by you. Ask the other participant to request control.");
+      return;
+    }
+    if (selectedRemoteHostOwnership !== "other") {
+      alert("Host must be claimed first. On owner side, click 'Claim As My Host'.");
+      return;
+    }
+    if (selectedRemoteHost?.busy) {
+      alert("Selected host is currently busy.");
+      return;
+    }
     requestRemoteDesktopSession(effectiveSelectedRemoteHostId);
   };
 
@@ -447,6 +464,18 @@ const Room = () => {
   )
     ? selectedRemoteHostId
     : "";
+  const selectedRemoteHost = remoteHosts.find(
+    (host) => host.hostId === effectiveSelectedRemoteHostId
+  );
+  const selectedRemoteHostOwnership = selectedRemoteHost?.ownership || "unclaimed";
+  const canClaimSelectedHost =
+    !!effectiveSelectedRemoteHostId && selectedRemoteHostOwnership !== "other";
+  const canRequestSelectedHost =
+    !!effectiveSelectedRemoteHostId &&
+    !!selectedRemoteHost &&
+    !selectedRemoteHost.busy &&
+    !remoteDesktopPendingRequest &&
+    selectedRemoteHostOwnership === "other";
   const effectiveSetupPeerId = otherParticipants.includes(selectedSetupPeerId)
     ? selectedSetupPeerId
     : otherParticipants.length === 1
@@ -712,6 +741,7 @@ const Room = () => {
                       {remoteHosts.map((host) => (
                         <option key={host.hostId} value={host.hostId}>
                           {host.hostId}
+                          {` [${getHostOwnershipLabel(host.ownership)}]`}
                           {host.busy ? " (busy)" : ""}
                         </option>
                       ))}
@@ -721,20 +751,28 @@ const Room = () => {
                     </button>
                     <button
                       onClick={() => claimRemoteHost(effectiveSelectedRemoteHostId)}
-                      disabled={!effectiveSelectedRemoteHostId}
+                      disabled={!canClaimSelectedHost}
                       className="btn btn-secondary remote-claim-btn"
                     >
-                      {claimedRemoteHostId === effectiveSelectedRemoteHostId
+                      {selectedRemoteHostOwnership === "other"
+                        ? "Claimed by Other"
+                        : claimedRemoteHostId === effectiveSelectedRemoteHostId
                         ? "Host Claimed"
                         : "Claim As My Host"}
                     </button>
                     <button
                       onClick={connectRemoteDesktop}
-                      disabled={!!remoteDesktopPendingRequest || !effectiveSelectedRemoteHostId}
+                      disabled={!canRequestSelectedHost}
                       className="btn btn-primary remote-connect-btn"
                     >
                       {remoteDesktopPendingRequest
                         ? "Waiting for Approval..."
+                        : selectedRemoteHost?.busy
+                        ? "Host Busy"
+                        : selectedRemoteHostOwnership === "you"
+                        ? "Other User Must Request"
+                        : selectedRemoteHostOwnership === "unclaimed"
+                        ? "Claim Host First"
                         : "Request Remote Control"}
                     </button>
                     {remoteDesktopPendingRequest && (
@@ -742,6 +780,10 @@ const Room = () => {
                         Cancel Request
                       </button>
                     )}
+                    <div className="muted-text">
+                      Host tags: <strong>You</strong> means claimed by you, <strong>Other</strong>{" "}
+                      means claimed by the other participant.
+                    </div>
                   </div>
                 ) : (
                   <div className="remote-setup-row">
@@ -823,11 +865,11 @@ const Room = () => {
                   <button
                     onClick={() => {
                       dismissHostAppInstallPrompt();
-                      if (effectiveSelectedRemoteHostId) {
+                      if (canRequestSelectedHost) {
                         requestRemoteDesktopSession(effectiveSelectedRemoteHostId);
                       }
                     }}
-                    disabled={!effectiveSelectedRemoteHostId}
+                    disabled={!canRequestSelectedHost}
                     className="btn btn-default"
                   >
                     Retry Request
