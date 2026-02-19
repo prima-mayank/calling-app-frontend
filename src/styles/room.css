@@ -131,7 +131,38 @@
   align-items: center;
 }
 
+.remote-setup-row {
+  margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
 .remote-connect-btn {
+  min-height: 44px;
+}
+
+.remote-host-select {
+  min-height: 44px;
+  min-width: 180px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid var(--border-0);
+  background: rgba(18, 29, 49, 0.86);
+  color: var(--text-0);
+}
+
+.remote-host-select:focus {
+  outline: 2px solid rgba(88, 169, 255, 0.55);
+  outline-offset: 1px;
+}
+
+.remote-refresh-btn {
+  min-height: 44px;
+}
+
+.remote-claim-btn {
   min-height: 44px;
 }
 

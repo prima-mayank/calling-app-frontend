@@ -52,7 +52,13 @@ const Room = () => {
     isScreenSharing,
     remoteDesktopSession,
     remoteDesktopPendingRequest,
+    remoteHosts,
+    roomParticipants,
+    claimedRemoteHostId,
     incomingRemoteDesktopRequest,
+    incomingRemoteHostSetupRequest,
+    remoteHostSetupPending,
+    remoteHostSetupStatus,
     remoteDesktopFrame,
     remoteDesktopError,
     hostAppInstallPrompt,
@@ -62,9 +68,13 @@ const Room = () => {
     startScreenShare,
     stopScreenShare,
     requestRemoteDesktopSession,
+    requestRemoteHostSetup,
+    claimRemoteHost,
+    refreshRemoteHosts,
     stopRemoteDesktopSession,
     dismissHostAppInstallPrompt,
     respondToRemoteDesktopRequest,
+    respondToRemoteHostSetupRequest,
     sendRemoteDesktopInput,
     endCall,
   } = useContext(SocketContext);
@@ -73,6 +83,8 @@ const Room = () => {
   const [remoteInputActive, setRemoteInputActive] = useState(false);
   const [showRemotePanel, setShowRemotePanel] = useState(false);
   const [zoomTarget, setZoomTarget] = useState("");
+  const [selectedRemoteHostId, setSelectedRemoteHostId] = useState("");
+  const [selectedSetupPeerId, setSelectedSetupPeerId] = useState("");
   const moveThrottleRef = useRef(0);
   const remoteSurfaceRef = useRef(null);
   const remoteFrameRef = useRef(null);
@@ -417,12 +429,29 @@ const Room = () => {
   };
 
   const connectRemoteDesktop = () => {
-    requestRemoteDesktopSession();
+    if (!effectiveSelectedRemoteHostId) {
+      alert("Select a host first.");
+      return;
+    }
+    requestRemoteDesktopSession(effectiveSelectedRemoteHostId);
   };
 
   const isControlActive = remoteInputActive && !!remoteDesktopSession;
   const shouldShowRemotePanel = showRemotePanel || hasRemoteActivity;
   const hasVideoTrack = !!stream && stream.getVideoTracks().length > 0;
+  const otherParticipants = roomParticipants.filter(
+    (participantId) => participantId && participantId !== user?.id
+  );
+  const effectiveSelectedRemoteHostId = remoteHosts.some(
+    (host) => host.hostId === selectedRemoteHostId
+  )
+    ? selectedRemoteHostId
+    : "";
+  const effectiveSetupPeerId = otherParticipants.includes(selectedSetupPeerId)
+    ? selectedSetupPeerId
+    : otherParticipants.length === 1
+    ? otherParticipants[0]
+    : "";
   const peerIds = Object.keys(peers);
   const peerCount = peerIds.length;
   const modeLabel = isScreenSharing
@@ -671,20 +700,83 @@ const Room = () => {
 
           <div className="remote-card-body">
             {!remoteDesktopSession && (
-              <div className="remote-connect-row">
-                <button
-                  onClick={connectRemoteDesktop}
-                  disabled={!!remoteDesktopPendingRequest}
-                  className="btn btn-primary remote-connect-btn"
-                >
-                  {remoteDesktopPendingRequest ? "Waiting for Approval..." : "Request Remote Control"}
-                </button>
-                {remoteDesktopPendingRequest && (
-                  <button onClick={stopRemoteDesktopSession} className="btn btn-danger remote-connect-btn">
-                    Cancel Request
-                  </button>
+              <>
+                {remoteHosts.length > 0 ? (
+                  <div className="remote-connect-row">
+                    <select
+                      value={effectiveSelectedRemoteHostId}
+                      onChange={(event) => setSelectedRemoteHostId(event.target.value)}
+                      className="remote-host-select"
+                    >
+                      <option value="">Select Host</option>
+                      {remoteHosts.map((host) => (
+                        <option key={host.hostId} value={host.hostId}>
+                          {host.hostId}
+                          {host.busy ? " (busy)" : ""}
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={refreshRemoteHosts} className="btn btn-default remote-refresh-btn">
+                      Refresh Hosts
+                    </button>
+                    <button
+                      onClick={() => claimRemoteHost(effectiveSelectedRemoteHostId)}
+                      disabled={!effectiveSelectedRemoteHostId}
+                      className="btn btn-secondary remote-claim-btn"
+                    >
+                      {claimedRemoteHostId === effectiveSelectedRemoteHostId
+                        ? "Host Claimed"
+                        : "Claim As My Host"}
+                    </button>
+                    <button
+                      onClick={connectRemoteDesktop}
+                      disabled={!!remoteDesktopPendingRequest || !effectiveSelectedRemoteHostId}
+                      className="btn btn-primary remote-connect-btn"
+                    >
+                      {remoteDesktopPendingRequest
+                        ? "Waiting for Approval..."
+                        : "Request Remote Control"}
+                    </button>
+                    {remoteDesktopPendingRequest && (
+                      <button onClick={stopRemoteDesktopSession} className="btn btn-danger remote-connect-btn">
+                        Cancel Request
+                      </button>
+                    )}
+                  </div>
+                ) : (
+                  <div className="remote-setup-row">
+                    <select
+                      value={effectiveSetupPeerId}
+                      onChange={(event) => setSelectedSetupPeerId(event.target.value)}
+                      className="remote-host-select"
+                      disabled={otherParticipants.length <= 1}
+                    >
+                      <option value="">
+                        {otherParticipants.length === 0
+                          ? "No participant available"
+                          : "Select Participant"}
+                      </option>
+                      {otherParticipants.map((peerId) => (
+                        <option key={peerId} value={peerId}>
+                          {peerId}
+                        </option>
+                      ))}
+                    </select>
+                    <button onClick={refreshRemoteHosts} className="btn btn-default remote-refresh-btn">
+                      Refresh Hosts
+                    </button>
+                    <button
+                      onClick={() => requestRemoteHostSetup(effectiveSetupPeerId)}
+                      disabled={!effectiveSetupPeerId || !!remoteHostSetupPending}
+                      className="btn btn-primary remote-connect-btn"
+                    >
+                      {remoteHostSetupPending
+                        ? "Waiting Setup Approval..."
+                        : "Request Host Setup"}
+                    </button>
+                  </div>
                 )}
-              </div>
+              </>
             )}
 
             {remoteDesktopSession && (
@@ -697,6 +789,7 @@ const Room = () => {
             )}
 
             {remoteDesktopError && <div className="error-text">{remoteDesktopError}</div>}
+            {remoteHostSetupStatus && <div className="muted-text">{remoteHostSetupStatus}</div>}
             {hostAppInstallPrompt && (
               <div className="host-app-prompt">
                 <div className="host-app-prompt-title">Host App Required</div>
@@ -707,6 +800,16 @@ const Room = () => {
                   Ask the other user to install and run the host app, then retry.
                 </div>
                 <div className="host-app-prompt-actions">
+                  {!!hostAppInstallPrompt.launchUrl && (
+                    <button
+                      onClick={() =>
+                        window.open(hostAppInstallPrompt.launchUrl, "_blank", "noopener,noreferrer")
+                      }
+                      className="btn btn-secondary"
+                    >
+                      Launch Host App
+                    </button>
+                  )}
                   {!!hostAppInstallPrompt.downloadUrl && (
                     <button
                       onClick={() =>
@@ -720,8 +823,11 @@ const Room = () => {
                   <button
                     onClick={() => {
                       dismissHostAppInstallPrompt();
-                      requestRemoteDesktopSession();
+                      if (effectiveSelectedRemoteHostId) {
+                        requestRemoteDesktopSession(effectiveSelectedRemoteHostId);
+                      }
                     }}
+                    disabled={!effectiveSelectedRemoteHostId}
                     className="btn btn-default"
                   >
                     Retry Request
@@ -732,7 +838,8 @@ const Room = () => {
             {incomingRemoteDesktopRequest && (
               <div className="remote-status-row">
                 <div className="remote-host-label">
-                  {incomingRemoteDesktopRequest.requesterId} requested remote control.
+                  {incomingRemoteDesktopRequest.requesterId} requested remote control for host{" "}
+                  {incomingRemoteDesktopRequest.hostId || "unknown"}.
                 </div>
                 <button
                   onClick={() => respondToRemoteDesktopRequest(true)}
@@ -748,9 +855,35 @@ const Room = () => {
                 </button>
               </div>
             )}
+            {incomingRemoteHostSetupRequest && (
+              <div className="remote-status-row">
+                <div className="remote-host-label">
+                  {incomingRemoteHostSetupRequest.requesterId} asked to start host app on your
+                  device.
+                </div>
+                <button
+                  onClick={() => respondToRemoteHostSetupRequest(true)}
+                  className="btn btn-primary"
+                >
+                  Accept & Setup
+                </button>
+                <button
+                  onClick={() => respondToRemoteHostSetupRequest(false)}
+                  className="btn btn-danger"
+                >
+                  Reject
+                </button>
+              </div>
+            )}
             {remoteDesktopPendingRequest && !remoteDesktopSession && (
               <div className="muted-text">
                 Request sent to host {remoteDesktopPendingRequest.hostId}. Waiting for other participant approval.
+              </div>
+            )}
+            {remoteHostSetupPending && !remoteDesktopSession && (
+              <div className="muted-text">
+                Host setup request sent to {remoteHostSetupPending.targetPeerId}. Waiting for
+                acceptance.
               </div>
             )}
 

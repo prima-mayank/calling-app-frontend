@@ -16,11 +16,27 @@ const REMOTE_CONTROL_TOKEN = import.meta.env.VITE_REMOTE_CONTROL_TOKEN || "";
 const HOST_APP_DOWNLOAD_URL =
   import.meta.env.VITE_HOST_APP_DOWNLOAD_URL ||
   "https://github.com/prima-mayank/remote-agent/releases/latest/download/host-app-win.zip";
+const HOST_APP_PROTOCOL_URL = String(import.meta.env.VITE_HOST_APP_PROTOCOL_URL || "").trim();
 const HOST_APP_REQUIRED_ERROR_CODES = new Set([
-  "host-not-resolved",
   "host-not-found",
   "host-offline",
+  "host-owner-unclaimed",
 ]);
+
+const buildHostAppLaunchUrl = (hostId = "") => {
+  if (!HOST_APP_PROTOCOL_URL) return "";
+
+  try {
+    const launchUrl = new URL(HOST_APP_PROTOCOL_URL);
+    launchUrl.searchParams.set("server", WS_SERVER);
+    if (hostId) {
+      launchUrl.searchParams.set("hostId", hostId);
+    }
+    return launchUrl.toString();
+  } catch {
+    return "";
+  }
+};
 
 const shouldInitiateCall = (localPeerId, remotePeerId) => {
   if (!localPeerId || !remotePeerId) return false;
@@ -95,6 +111,10 @@ export const SocketProvider = ({ children }) => {
   const remoteSessionIdRef = useRef(null);
   const userRef = useRef(user);
   const streamRef = useRef(stream);
+  const claimedRemoteHostIdRef = useRef("");
+  const autoClaimRemoteHostIdRef = useRef("");
+  const autoRequestRemoteHostIdRef = useRef("");
+  const remoteDesktopPendingRequestRef = useRef(null);
   const screenShareTrackRef = useRef(null);
   const cameraTrackBeforeShareRef = useRef(null);
 
@@ -104,11 +124,21 @@ export const SocketProvider = ({ children }) => {
 
   const [remoteDesktopSession, setRemoteDesktopSession] = useState(null);
   const [remoteDesktopPendingRequest, setRemoteDesktopPendingRequest] = useState(null);
+  const [remoteHosts, setRemoteHosts] = useState([]);
+  const [roomParticipants, setRoomParticipants] = useState([]);
+  const [claimedRemoteHostId, setClaimedRemoteHostId] = useState("");
   const [incomingRemoteDesktopRequest, setIncomingRemoteDesktopRequest] = useState(null);
+  const [incomingRemoteHostSetupRequest, setIncomingRemoteHostSetupRequest] = useState(null);
+  const [remoteHostSetupPending, setRemoteHostSetupPending] = useState(null);
+  const [remoteHostSetupStatus, setRemoteHostSetupStatus] = useState("");
+  const [autoClaimRemoteHostId, setAutoClaimRemoteHostId] = useState("");
+  const [autoRequestRemoteHostId, setAutoRequestRemoteHostId] = useState("");
   const [remoteDesktopFrame, setRemoteDesktopFrame] = useState(null);
   const [remoteDesktopError, setRemoteDesktopError] = useState("");
   const [hostAppInstallPrompt, setHostAppInstallPrompt] = useState(null);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
+
+  const logRemote = () => {};
 
   useEffect(() => {
     userRef.current = user;
@@ -119,23 +149,48 @@ export const SocketProvider = ({ children }) => {
   }, [stream]);
 
   useEffect(() => {
+    claimedRemoteHostIdRef.current = claimedRemoteHostId;
+  }, [claimedRemoteHostId]);
+
+  useEffect(() => {
+    autoClaimRemoteHostIdRef.current = autoClaimRemoteHostId;
+  }, [autoClaimRemoteHostId]);
+
+  useEffect(() => {
+    autoRequestRemoteHostIdRef.current = autoRequestRemoteHostId;
+  }, [autoRequestRemoteHostId]);
+
+  useEffect(() => {
+    remoteDesktopPendingRequestRef.current = remoteDesktopPendingRequest;
+  }, [remoteDesktopPendingRequest]);
+
+  const refreshRemoteHosts = useCallback(() => {
+    logRemote("request-hosts-list");
+    socket.emit("remote-hosts-request");
+  }, []);
+
+  useEffect(() => {
     const onConnect = () => setSocketConnected(true);
     const onDisconnect = () => setSocketConnected(false);
-    const onConnectError = (err) => {
-      console.warn("socket connect_error:", err?.message || err);
+    const onConnectError = () => {
       setSocketConnected(false);
     };
 
-    socket.on("connect", onConnect);
+    const onConnected = () => {
+      onConnect();
+      refreshRemoteHosts();
+    };
+
+    socket.on("connect", onConnected);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
 
     return () => {
-      socket.off("connect", onConnect);
+      socket.off("connect", onConnected);
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
     };
-  }, []);
+  }, [refreshRemoteHosts]);
 
   const provideStream = async (isVideoCall = true) => {
     const mediaApiMissing = !navigator.mediaDevices?.getUserMedia;
@@ -206,7 +261,7 @@ export const SocketProvider = ({ children }) => {
     });
 
     call.on("error", (err) => {
-      console.warn("call error with", peerId, err);
+      void err;
     });
   }, []);
 
@@ -220,16 +275,20 @@ export const SocketProvider = ({ children }) => {
         try {
           await videoSender.replaceTrack(nextTrack || null);
         } catch (err) {
-          console.warn("replaceTrack failed:", err);
+          void err;
         }
       })
     );
   }, []);
 
   const fetchParticipantList = useCallback(({ participants }) => {
-    if (!participants || participants.length === 0) return;
+    const uniqueParticipants = Array.isArray(participants)
+      ? [...new Set(participants.map((item) => String(item || "").trim()).filter(Boolean))]
+      : [];
 
-    const uniqueParticipants = [...new Set(participants)];
+    setRoomParticipants(uniqueParticipants);
+    if (uniqueParticipants.length === 0) return;
+
     const localUser = userRef.current;
     const localStream = streamRef.current;
 
@@ -249,11 +308,29 @@ export const SocketProvider = ({ children }) => {
     }
   }, [setupCallHandlers]);
 
-  const requestRemoteDesktopSession = () => {
+  const requestRemoteDesktopSession = useCallback((hostId = "") => {
+    logRemote("request-session", { hostId: String(hostId || "").trim() });
     setRemoteDesktopError("");
     setRemoteDesktopPendingRequest(null);
+    setRemoteHostSetupStatus("");
     setHostAppInstallPrompt(null);
-    socket.emit("remote-session-request");
+    socket.emit("remote-session-request", { hostId });
+  }, []);
+
+  const requestRemoteHostSetup = (targetPeerId = "") => {
+    const normalizedTargetPeerId = String(targetPeerId || "").trim();
+    logRemote("request-host-setup", { targetPeerId: normalizedTargetPeerId });
+    setRemoteDesktopError("");
+    setRemoteHostSetupStatus("");
+    setHostAppInstallPrompt(null);
+    socket.emit("remote-host-setup-request", { targetPeerId: normalizedTargetPeerId });
+  };
+
+  const claimRemoteHost = (hostId = "") => {
+    const normalizedHostId = String(hostId || "").trim();
+    if (!normalizedHostId) return;
+    logRemote("claim-host", { hostId: normalizedHostId });
+    socket.emit("remote-host-claim", { hostId: normalizedHostId });
   };
 
   const stopRemoteDesktopSession = () => {
@@ -285,6 +362,38 @@ export const SocketProvider = ({ children }) => {
       reason: accepted ? "" : "Rejected by participant.",
     });
     setIncomingRemoteDesktopRequest(null);
+  };
+
+  const respondToRemoteHostSetupRequest = (accepted) => {
+    if (!incomingRemoteHostSetupRequest?.requestId) return;
+
+    const suggestedHostId = String(incomingRemoteHostSetupRequest.suggestedHostId || "").trim();
+    const launchUrl = buildHostAppLaunchUrl(suggestedHostId);
+
+    socket.emit("remote-host-setup-decision", {
+      requestId: incomingRemoteHostSetupRequest.requestId,
+      accepted: !!accepted,
+    });
+
+    if (accepted) {
+      if (launchUrl) {
+        window.open(launchUrl, "_blank", "noopener,noreferrer");
+      }
+      window.open(HOST_APP_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
+      setAutoClaimRemoteHostId(suggestedHostId);
+      setHostAppInstallPrompt({
+        message: suggestedHostId
+          ? `Setup accepted. Start the host app on this device with host ID '${suggestedHostId}'.`
+          : "Setup accepted. Start the host app on this device.",
+        downloadUrl: HOST_APP_DOWNLOAD_URL,
+        launchUrl,
+      });
+      setRemoteHostSetupStatus(
+        "Host setup accepted. Download opened. Start the host app and keep it running."
+      );
+    }
+
+    setIncomingRemoteHostSetupRequest(null);
   };
 
   const sendRemoteDesktopInput = (event) => {
@@ -407,31 +516,132 @@ export const SocketProvider = ({ children }) => {
 
       dispatch(removePeerAction(peerId));
       delete callsRef.current[peerId];
+      setRoomParticipants((prev) => prev.filter((id) => id !== peerId));
     };
 
     const onRemoteSessionPending = ({ requestId, hostId }) => {
+      logRemote("session-pending", { requestId, hostId });
       if (!requestId) return;
+      remoteDesktopPendingRequestRef.current = { requestId, hostId };
       setRemoteDesktopPendingRequest({ requestId, hostId });
       setRemoteDesktopError("");
       setHostAppInstallPrompt(null);
     };
 
-    const onRemoteSessionRequestedUi = ({ requestId, requesterId }) => {
+    const onRemoteSessionRequestedUi = ({ requestId, requesterId, hostId }) => {
+      logRemote("session-requested-ui", { requestId, requesterId, hostId });
       if (!requestId) return;
       setIncomingRemoteDesktopRequest({
         requestId,
         requesterId: requesterId || "another participant",
+        hostId: String(hostId || "").trim(),
       });
     };
 
+    const onRemoteHostSetupPending = ({ requestId, targetPeerId, suggestedHostId }) => {
+      if (!requestId) return;
+      const normalizedTargetPeerId = String(targetPeerId || "").trim();
+      const normalizedHostId = String(suggestedHostId || "").trim();
+      setRemoteHostSetupPending({
+        requestId,
+        targetPeerId: normalizedTargetPeerId,
+        suggestedHostId: normalizedHostId,
+      });
+      setRemoteHostSetupStatus(
+        normalizedTargetPeerId
+          ? `Host setup request sent to ${normalizedTargetPeerId}.`
+          : "Host setup request sent."
+      );
+    };
+
+    const onRemoteHostSetupRequested = ({ requestId, requesterId, suggestedHostId }) => {
+      if (!requestId) return;
+      setIncomingRemoteHostSetupRequest({
+        requestId,
+        requesterId: String(requesterId || "another participant").trim(),
+        suggestedHostId: String(suggestedHostId || "").trim(),
+      });
+    };
+
+    const onRemoteHostSetupResult = ({ status, message, suggestedHostId }) => {
+      const normalizedStatus = String(status || "").trim();
+      const normalizedMessage = String(message || "").trim();
+      const normalizedHostId = String(suggestedHostId || "").trim();
+
+      setRemoteHostSetupPending(null);
+      setRemoteHostSetupStatus(
+        normalizedMessage ||
+          (normalizedStatus === "accepted"
+            ? "Participant accepted host setup request."
+            : "Host setup request was not accepted.")
+      );
+
+      if (normalizedStatus === "accepted") {
+        setAutoRequestRemoteHostId(normalizedHostId);
+      }
+    };
+
     const onRemoteSessionStarted = ({ sessionId, hostId }) => {
+      logRemote("session-started", { sessionId, hostId });
       if (!sessionId) return;
       remoteSessionIdRef.current = sessionId;
+      remoteDesktopPendingRequestRef.current = null;
       setRemoteDesktopSession({ sessionId, hostId });
       setRemoteDesktopPendingRequest(null);
       setRemoteDesktopFrame(null);
       setRemoteDesktopError("");
       setHostAppInstallPrompt(null);
+      setRemoteHostSetupPending(null);
+      setRemoteHostSetupStatus("");
+    };
+
+    const onRemoteHostsList = ({ hosts }) => {
+      const normalizedHosts = Array.isArray(hosts)
+        ? hosts
+            .map((item) => ({
+              hostId: String(item?.hostId || "").trim(),
+              busy: !!item?.busy,
+            }))
+            .filter((item) => !!item.hostId)
+        : [];
+      setRemoteHosts(normalizedHosts);
+      logRemote("hosts-list", { count: normalizedHosts.length, hosts: normalizedHosts });
+
+      const pendingAutoClaimHostId = String(autoClaimRemoteHostIdRef.current || "").trim();
+      if (pendingAutoClaimHostId) {
+        const hostOnline = normalizedHosts.some(
+          (host) => host.hostId === pendingAutoClaimHostId
+        );
+        if (hostOnline) {
+          if (claimedRemoteHostIdRef.current !== pendingAutoClaimHostId) {
+            socket.emit("remote-host-claim", { hostId: pendingAutoClaimHostId });
+          }
+          setAutoClaimRemoteHostId("");
+        }
+      }
+
+      const pendingAutoRequestHostId = String(autoRequestRemoteHostIdRef.current || "").trim();
+      if (pendingAutoRequestHostId) {
+        const hostOnline = normalizedHosts.some(
+          (host) => host.hostId === pendingAutoRequestHostId
+        );
+        if (
+          hostOnline &&
+          !remoteSessionIdRef.current &&
+          !remoteDesktopPendingRequestRef.current
+        ) {
+          requestRemoteDesktopSession(pendingAutoRequestHostId);
+          setAutoRequestRemoteHostId("");
+        }
+      }
+    };
+
+    const onRemoteHostClaimed = ({ hostId }) => {
+      const normalizedHostId = String(hostId || "").trim();
+      if (!normalizedHostId) return;
+      claimedRemoteHostIdRef.current = normalizedHostId;
+      setClaimedRemoteHostId(normalizedHostId);
+      logRemote("host-claimed", { hostId: normalizedHostId });
     };
 
     const onRemoteSessionEnded = ({ sessionId }) => {
@@ -445,8 +655,10 @@ export const SocketProvider = ({ children }) => {
         if (prev.sessionId !== sessionId) return prev;
         return null;
       });
+      remoteDesktopPendingRequestRef.current = null;
       setRemoteDesktopPendingRequest(null);
       setIncomingRemoteDesktopRequest(null);
+      setIncomingRemoteHostSetupRequest(null);
       setRemoteDesktopFrame(null);
       setHostAppInstallPrompt(null);
     };
@@ -458,13 +670,16 @@ export const SocketProvider = ({ children }) => {
     };
 
     const onRemoteSessionError = ({ message, code }) => {
+      logRemote("session-error", { message, code });
       const normalizedMessage =
         typeof message === "string" && message.trim()
           ? message.trim()
           : "Remote session failed.";
       setRemoteDesktopError(normalizedMessage);
+      remoteDesktopPendingRequestRef.current = null;
       setRemoteDesktopPendingRequest(null);
       setIncomingRemoteDesktopRequest(null);
+      setRemoteHostSetupPending(null);
 
       if (HOST_APP_REQUIRED_ERROR_CODES.has(String(code || "").trim())) {
         setHostAppInstallPrompt({
@@ -479,12 +694,23 @@ export const SocketProvider = ({ children }) => {
     };
 
     const onSocketDisconnect = () => {
+      logRemote("socket-disconnect");
       remoteSessionIdRef.current = null;
+      remoteDesktopPendingRequestRef.current = null;
+      claimedRemoteHostIdRef.current = "";
       setRemoteDesktopSession(null);
       setRemoteDesktopPendingRequest(null);
       setIncomingRemoteDesktopRequest(null);
+      setIncomingRemoteHostSetupRequest(null);
+      setRemoteHostSetupPending(null);
+      setRemoteHostSetupStatus("");
       setRemoteDesktopFrame(null);
       setHostAppInstallPrompt(null);
+      setRemoteHosts([]);
+      setRoomParticipants([]);
+      setClaimedRemoteHostId("");
+      setAutoClaimRemoteHostId("");
+      setAutoRequestRemoteHostId("");
     };
 
     socket.on("room-created", enterRoom);
@@ -493,8 +719,13 @@ export const SocketProvider = ({ children }) => {
     socket.on("user-left", onUserLeft);
     socket.on("remote-session-pending", onRemoteSessionPending);
     socket.on("remote-session-requested-ui", onRemoteSessionRequestedUi);
+    socket.on("remote-host-setup-pending", onRemoteHostSetupPending);
+    socket.on("remote-host-setup-requested", onRemoteHostSetupRequested);
+    socket.on("remote-host-setup-result", onRemoteHostSetupResult);
     socket.on("remote-session-started", onRemoteSessionStarted);
     socket.on("remote-session-ended", onRemoteSessionEnded);
+    socket.on("remote-hosts-list", onRemoteHostsList);
+    socket.on("remote-host-claimed", onRemoteHostClaimed);
     socket.on("remote-frame", onRemoteFrame);
     socket.on("remote-session-error", onRemoteSessionError);
     socket.on("disconnect", onSocketDisconnect);
@@ -506,13 +737,22 @@ export const SocketProvider = ({ children }) => {
       socket.off("user-left", onUserLeft);
       socket.off("remote-session-pending", onRemoteSessionPending);
       socket.off("remote-session-requested-ui", onRemoteSessionRequestedUi);
+      socket.off("remote-host-setup-pending", onRemoteHostSetupPending);
+      socket.off("remote-host-setup-requested", onRemoteHostSetupRequested);
+      socket.off("remote-host-setup-result", onRemoteHostSetupResult);
       socket.off("remote-session-started", onRemoteSessionStarted);
       socket.off("remote-session-ended", onRemoteSessionEnded);
+      socket.off("remote-hosts-list", onRemoteHostsList);
+      socket.off("remote-host-claimed", onRemoteHostClaimed);
       socket.off("remote-frame", onRemoteFrame);
       socket.off("remote-session-error", onRemoteSessionError);
       socket.off("disconnect", onSocketDisconnect);
     };
-  }, [fetchParticipantList, navigate]);
+  }, [fetchParticipantList, navigate, requestRemoteDesktopSession]);
+
+  useEffect(() => {
+    refreshRemoteHosts();
+  }, [refreshRemoteHosts]);
 
   useEffect(() => {
     if (!user || !stream) return;
@@ -524,6 +764,9 @@ export const SocketProvider = ({ children }) => {
 
     const onUserJoined = ({ peerId }) => {
       if (!peerId || peerId === user.id) return;
+      setRoomParticipants((prev) =>
+        prev.includes(peerId) ? prev : [...prev, peerId]
+      );
       if (!shouldInitiateCall(user.id, peerId)) return;
       if (!callsRef.current[peerId]) {
         const call = user.call(peerId, stream);
@@ -569,13 +812,11 @@ export const SocketProvider = ({ children }) => {
   const toggleCamera = () => {
     if (!stream) return;
     if (isScreenSharing) {
-      console.warn("Camera toggle is disabled while screen sharing is active.");
       return;
     }
 
     const videoTracks = stream.getVideoTracks();
     if (videoTracks.length === 0) {
-      console.warn("No video tracks to toggle (Audio Only mode)");
       return;
     }
     videoTracks.forEach((t) => {
@@ -612,10 +853,14 @@ export const SocketProvider = ({ children }) => {
     setRemoteDesktopSession(null);
     setRemoteDesktopPendingRequest(null);
     setIncomingRemoteDesktopRequest(null);
+    setIncomingRemoteHostSetupRequest(null);
+    setRemoteHostSetupPending(null);
+    setRemoteHostSetupStatus("");
     remoteSessionIdRef.current = null;
     setRemoteDesktopFrame(null);
     setRemoteDesktopError("");
     setIsScreenSharing(false);
+    setRoomParticipants([]);
 
     if (screenShareTrackRef.current) {
       try {
@@ -654,7 +899,13 @@ export const SocketProvider = ({ children }) => {
         videoEnabled,
         remoteDesktopSession,
         remoteDesktopPendingRequest,
+        remoteHosts,
+        roomParticipants,
+        claimedRemoteHostId,
         incomingRemoteDesktopRequest,
+        incomingRemoteHostSetupRequest,
+        remoteHostSetupPending,
+        remoteHostSetupStatus,
         remoteDesktopFrame,
         remoteDesktopError,
         hostAppInstallPrompt,
@@ -666,9 +917,13 @@ export const SocketProvider = ({ children }) => {
         startScreenShare,
         stopScreenShare,
         requestRemoteDesktopSession,
+        requestRemoteHostSetup,
+        claimRemoteHost,
+        refreshRemoteHosts,
         stopRemoteDesktopSession,
         dismissHostAppInstallPrompt,
         respondToRemoteDesktopRequest,
+        respondToRemoteHostSetupRequest,
         sendRemoteDesktopInput,
         endCall,
       }}

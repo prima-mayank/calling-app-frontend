@@ -20,7 +20,6 @@ const UserFeedPlayer = ({ stream, muted = false, isLocal = false }) => {
 
       el.play().catch((err) => {
         if (err?.name === "AbortError") return;
-        console.warn("play() failed on video/audio element:", err);
       });
     } else {
       try {
