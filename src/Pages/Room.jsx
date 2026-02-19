@@ -70,6 +70,7 @@ const Room = () => {
   const [hasJoined, setHasJoined] = useState(false);
   const [remoteInputActive, setRemoteInputActive] = useState(false);
   const [showRemotePanel, setShowRemotePanel] = useState(false);
+  const [zoomTarget, setZoomTarget] = useState("");
   const moveThrottleRef = useRef(0);
   const remoteSurfaceRef = useRef(null);
   const remoteFrameRef = useRef(null);
@@ -379,6 +380,46 @@ const Room = () => {
   const isControlActive = remoteInputActive && !!remoteDesktopSession;
   const shouldShowRemotePanel = showRemotePanel || hasRemoteActivity;
   const hasVideoTrack = !!stream && stream.getVideoTracks().length > 0;
+  const peerIds = Object.keys(peers);
+  const peerCount = peerIds.length;
+  const modeLabel = isScreenSharing
+    ? "Screen Sharing"
+    : !stream
+    ? "Remote Only"
+    : hasVideoTrack
+    ? "Video Call"
+    : "Audio Call";
+  const isZoomed = (targetId) => zoomTarget === targetId;
+  const toggleZoom = (targetId) => {
+    setZoomTarget((prev) => (prev === targetId ? "" : targetId));
+  };
+
+  const videoTiles = [
+    {
+      id: "local",
+      label: `You ${!stream ? "(No Media)" : stream && !hasVideoTrack ? "(Audio Only)" : ""}`.trim(),
+      stream,
+      muted: true,
+      isLocal: true,
+    },
+    ...peerIds.map((peerId) => ({
+      id: `peer:${peerId}`,
+      label: peerId,
+      stream: peers[peerId].stream,
+      muted: false,
+      isLocal: false,
+    })),
+  ];
+
+  const effectiveZoomTarget =
+    zoomTarget.startsWith("peer:") && !peers[zoomTarget.slice(5)]
+      ? ""
+      : zoomTarget === "remote" && !shouldShowRemotePanel
+      ? ""
+      : zoomTarget;
+
+  const activeVideoTile = videoTiles.find((tile) => tile.id === effectiveZoomTarget) || null;
+  const isVideoSpotlightActive = !!activeVideoTile;
 
   const getPrimaryTouch = (event) => event.touches?.[0] || event.changedTouches?.[0];
 
@@ -479,73 +520,106 @@ const Room = () => {
 
   return (
     <div className="room-page">
-      <h3 className="room-title">Room : {id}</h3>
+      <div className="room-header panel">
+        <div className="room-header-main">
+          <h3 className="room-title">Room: {id}</h3>
+          <p className="room-meta">
+            <span className="room-badge">{modeLabel}</span>
+            <span className="room-meta-sep">•</span>
+            <span>{peerCount + 1} participant{peerCount + 1 === 1 ? "" : "s"}</span>
+          </p>
+        </div>
+      </div>
 
       <div className="room-toolbar">
-        <button onClick={toggleMic} disabled={!stream} className="btn btn-default">
-          {audioEnabled ? "Mute Mic" : "Unmute Mic"}
-        </button>
-
-        {hasVideoTrack && (
-          <button onClick={toggleCamera} className="btn btn-default">
-            {videoEnabled ? "Turn Camera Off" : "Turn Camera On"}
+        <div className="room-toolbar-group">
+          <button onClick={toggleMic} disabled={!stream} className="btn btn-default">
+            {audioEnabled ? "Mute Mic" : "Unmute Mic"}
           </button>
-        )}
 
-        {hasVideoTrack && !isScreenSharing && (
-          <button onClick={startScreenShare} className="btn btn-primary">
-            Share Screen
+          {hasVideoTrack && (
+            <button onClick={toggleCamera} className="btn btn-default">
+              {videoEnabled ? "Turn Camera Off" : "Turn Camera On"}
+            </button>
+          )}
+
+          {hasVideoTrack && !isScreenSharing && (
+            <button onClick={startScreenShare} className="btn btn-primary">
+              Share Screen
+            </button>
+          )}
+
+          {isScreenSharing && (
+            <button onClick={stopScreenShare} className="btn btn-danger">
+              Stop Sharing
+            </button>
+          )}
+
+          <button onClick={() => endCall(id)} className="btn btn-danger">
+            End Call
           </button>
-        )}
+        </div>
 
-        {isScreenSharing && (
-          <button onClick={stopScreenShare} className="btn btn-danger">
-            Stop Sharing
+        <div className="room-toolbar-group room-toolbar-group--secondary">
+          <button onClick={() => setShowRemotePanel((prev) => !prev)} className="btn btn-default">
+            {shouldShowRemotePanel ? "Hide Remote Panel" : "Remote Control"}
           </button>
-        )}
 
-        <button onClick={() => setShowRemotePanel((prev) => !prev)} className="btn btn-default">
-          {shouldShowRemotePanel ? "Hide Remote Panel" : "Remote Control"}
-        </button>
+          {!!effectiveZoomTarget && (
+            <button onClick={() => setZoomTarget("")} className="btn btn-default">
+              Unzoom
+            </button>
+          )}
 
-        <button onClick={() => endCall(id)} className="btn btn-danger">
-          End Call
-        </button>
-
-        <button
-          onClick={async () => {
-            const url = window.location.href;
-            if (navigator.share) {
-              try {
-                await navigator.share({ url });
-                return;
-              } catch {
-                // fall through to copy fallback
+          <button
+            onClick={async () => {
+              const url = window.location.href;
+              if (navigator.share) {
+                try {
+                  await navigator.share({ url });
+                  return;
+                } catch {
+                  // fall through to copy fallback
+                }
               }
-            }
 
-            const copied = await copyTextFallback(url);
-            if (copied) {
-              alert("Link copied!");
-              return;
-            }
+              const copied = await copyTextFallback(url);
+              if (copied) {
+                alert("Link copied!");
+                return;
+              }
 
-            window.prompt("Copy this room link:", url);
-          }}
-          className="btn btn-primary"
-        >
-          Share Link
-        </button>
+              window.prompt("Copy this room link:", url);
+            }}
+            className="btn btn-primary"
+          >
+            Share Link
+          </button>
+        </div>
       </div>
 
       {shouldShowRemotePanel && (
-        <div className="remote-card">
+        <div className={`remote-card ${isZoomed("remote") ? "remote-card--zoomed" : ""} ${isVideoSpotlightActive ? "remote-card--dimmed" : ""}`}>
           <div className="remote-card-header">
             <div className="remote-card-top">
               <h4 className="remote-card-title">Full Remote Desktop (Host Agent)</h4>
-              <button onClick={() => setShowRemotePanel(false)} className="btn btn-default remote-hide-btn">
-                Close
-              </button>
+              <div className="remote-card-actions">
+                <button
+                  onClick={() => toggleZoom("remote")}
+                  className="btn btn-secondary remote-hide-btn"
+                >
+                  {isZoomed("remote") ? "Unzoom" : "Zoom"}
+                </button>
+                <button
+                  onClick={() => {
+                    setShowRemotePanel(false);
+                    if (isZoomed("remote")) setZoomTarget("");
+                  }}
+                  className="btn btn-default remote-hide-btn"
+                >
+                  Close
+                </button>
+              </div>
             </div>
             <p className="remote-card-subtitle">
               Request remote control from an available host agent.
@@ -687,29 +761,72 @@ const Room = () => {
         </div>
       )}
 
-      <div className="feeds-layout">
-        <div className="feed-section">
-          <h4 className="feed-title">
-            You {!stream && "(No Media)"} {stream && !hasVideoTrack && "(Audio Only)"}
-          </h4>
-          <UserFeedPlayer stream={stream} muted={true} isLocal />
-        </div>
+      {isVideoSpotlightActive ? (
+        <div className="spotlight-layout">
+          <div className="spotlight-main panel">
+            <div className="spotlight-main-header">
+              <h4 className="feed-title">{activeVideoTile.label}</h4>
+              <button onClick={() => setZoomTarget("")} className="btn btn-secondary feed-zoom-btn">
+                Unzoom
+              </button>
+            </div>
+            <UserFeedPlayer
+              stream={activeVideoTile.stream}
+              muted={activeVideoTile.muted}
+              isLocal={activeVideoTile.isLocal}
+            />
+          </div>
 
-        <div className="feed-section">
-          <h4 className="feed-title">Participants</h4>
-          <div className="participants-grid">
-            {Object.keys(peers).length === 0 && (
-              <div className="muted-text">No other participants</div>
-            )}
-
-            {Object.keys(peers).map((peerId) => (
-              <div key={peerId} className="participant-card">
-                <UserFeedPlayer stream={peers[peerId].stream} muted={false} />
-              </div>
-            ))}
+          <div className="spotlight-strip">
+            {videoTiles
+              .filter((tile) => tile.id !== activeVideoTile.id)
+              .map((tile) => (
+                <div key={tile.id} className="spotlight-tile">
+                  <div className="participant-card-header">
+                    <div className="participant-name">{tile.label}</div>
+                    <button onClick={() => setZoomTarget(tile.id)} className="btn btn-secondary feed-zoom-btn">
+                      Focus
+                    </button>
+                  </div>
+                  <UserFeedPlayer stream={tile.stream} muted={tile.muted} isLocal={tile.isLocal} />
+                </div>
+              ))}
           </div>
         </div>
-      </div>
+      ) : (
+        <div className="feeds-layout">
+          <div className="feed-section">
+            <div className="feed-title-row">
+              <h4 className="feed-title">
+                You {!stream && "(No Media)"} {stream && !hasVideoTrack && "(Audio Only)"}
+              </h4>
+              <button onClick={() => toggleZoom("local")} className="btn btn-secondary feed-zoom-btn">
+                Zoom
+              </button>
+            </div>
+            <UserFeedPlayer stream={stream} muted={true} isLocal />
+          </div>
+
+          <div className="feed-section">
+            <h4 className="feed-title">Participants</h4>
+            <div className="participants-grid">
+              {peerIds.length === 0 && <div className="muted-text">No other participants</div>}
+
+              {peerIds.map((peerId) => (
+                <div key={peerId} className="participant-card">
+                  <div className="participant-card-header">
+                    <div className="participant-name">{peerId}</div>
+                    <button onClick={() => toggleZoom(`peer:${peerId}`)} className="btn btn-secondary feed-zoom-btn">
+                      Zoom
+                    </button>
+                  </div>
+                  <UserFeedPlayer stream={peers[peerId].stream} muted={false} />
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

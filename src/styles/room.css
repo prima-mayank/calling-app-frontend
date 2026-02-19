@@ -5,23 +5,68 @@
   padding: clamp(12px, 2.2vw, 24px);
 }
 
+.room-header {
+  margin-bottom: 12px;
+  padding: 14px 16px;
+}
+
+.room-header-main {
+  min-width: 0;
+}
+
 .room-title {
   font-size: clamp(1.02rem, 2.2vw, 1.35rem);
-  margin-bottom: 12px;
+  margin-bottom: 6px;
   word-break: break-word;
   color: var(--text-1);
 }
 
-.room-toolbar {
-  margin-bottom: 14px;
+.room-meta {
   display: flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
+  color: var(--text-2);
+  font-size: 0.9rem;
+}
+
+.room-badge {
+  display: inline-flex;
   align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(157, 191, 255, 0.32);
+  background: rgba(35, 58, 95, 0.62);
+  color: #dceaff;
+  font-weight: 700;
+  font-size: 0.78rem;
+  letter-spacing: 0.25px;
+}
+
+.room-meta-sep {
+  opacity: 0.65;
+}
+
+.room-toolbar {
+  margin-bottom: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 10px;
   padding: 12px;
   border-radius: var(--radius-md);
   background: rgba(22, 36, 62, 0.76);
   border: 1px solid var(--border-0);
+}
+
+.room-toolbar-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.room-toolbar-group--secondary {
+  justify-content: flex-end;
 }
 
 .remote-card {
@@ -30,6 +75,15 @@
   border: 1px solid var(--border-0);
   background: linear-gradient(180deg, rgba(24, 38, 65, 0.88), rgba(19, 31, 54, 0.86));
   box-shadow: var(--shadow-0);
+}
+
+.remote-card--zoomed {
+  border-color: rgba(88, 169, 255, 0.46);
+  box-shadow: 0 0 0 3px rgba(88, 169, 255, 0.14), var(--shadow-0);
+}
+
+.remote-card--dimmed {
+  opacity: 0.45;
 }
 
 .remote-card-header {
@@ -42,6 +96,13 @@
   gap: 10px;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.remote-card-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
 }
 
 .remote-card-title {
@@ -186,9 +247,23 @@
   background: rgba(19, 31, 54, 0.74);
 }
 
-.feed-title {
+.feed-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
   margin-bottom: 10px;
+}
+
+.feed-title {
+  margin-bottom: 0;
   color: var(--text-1);
+}
+
+.feed-zoom-btn {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
 }
 
 .participants-grid {
@@ -207,8 +282,118 @@
   background: rgba(14, 22, 37, 0.76);
 }
 
+.participant-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.participant-name {
+  color: var(--text-2);
+  font-size: 0.82rem;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.spotlight-layout {
+  display: grid;
+  gap: 12px;
+}
+
+.spotlight-main {
+  padding: 14px;
+}
+
+.spotlight-main .user-feed-video {
+  aspect-ratio: 16 / 9;
+  min-height: clamp(280px, 56vw, 620px);
+}
+
+.spotlight-main-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.spotlight-strip {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.spotlight-tile {
+  min-width: 0;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(154, 186, 255, 0.2);
+  background: rgba(14, 22, 37, 0.76);
+}
+
+.spotlight-tile .user-feed-video {
+  aspect-ratio: 16 / 10;
+}
+
 @media (max-width: 900px) {
   .feeds-layout {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .room-toolbar {
+    grid-template-columns: 1fr;
+    gap: 8px;
+  }
+
+  .room-toolbar-group,
+  .room-toolbar-group--secondary {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    justify-content: stretch;
+  }
+
+  .room-toolbar .btn,
+  .room-toolbar-group .btn {
+    width: 100%;
+    justify-self: stretch;
+  }
+
+  .remote-card-top {
+    align-items: flex-start;
+  }
+
+  .remote-hide-btn {
+    min-width: 88px;
+  }
+
+  .remote-surface {
+    min-height: clamp(180px, 52vw, 320px);
+  }
+
+  .participants-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .spotlight-main .user-feed-video {
+    min-height: clamp(220px, 58vw, 420px);
+  }
+
+  .spotlight-strip {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scroll-snap-type: x proximity;
+  }
+
+  .spotlight-tile {
+    min-width: min(64vw, 260px);
+    scroll-snap-align: start;
   }
 }
