@@ -12,6 +12,8 @@ const mapMouseButton = (button) => {
 const MOVE_EVENT_THROTTLE_MS = 20;
 const TOUCH_TAP_MAX_MOVE = 0.015;
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
+const HOME_JOIN_PREF_KEY = "home_join_pref_v1";
+const HOME_JOIN_PREF_MAX_AGE_MS = 5 * 60 * 1000;
 
 const copyTextFallback = async (text) => {
   if (navigator.clipboard?.writeText) {
@@ -95,6 +97,47 @@ const Room = () => {
     if (!media) return;
     setHasJoined(true);
   };
+
+  useEffect(() => {
+    if (hasJoined) return;
+
+    let parsed = null;
+    try {
+      const raw = sessionStorage.getItem(HOME_JOIN_PREF_KEY);
+      if (raw) parsed = JSON.parse(raw);
+    } catch {
+      parsed = null;
+    }
+
+    if (!parsed || typeof parsed !== "object") return;
+
+    const mode = String(parsed.mode || "").trim();
+    const ts = Number(parsed.ts || 0);
+    const isFresh =
+      Number.isFinite(ts) && ts > 0 && Date.now() - ts <= HOME_JOIN_PREF_MAX_AGE_MS;
+
+    try {
+      sessionStorage.removeItem(HOME_JOIN_PREF_KEY);
+    } catch {
+      // noop
+    }
+
+    if (!isFresh) return;
+    if (mode !== "video" && mode !== "audio" && mode !== "none") return;
+
+    const autoJoin = async () => {
+      if (mode === "none") {
+        setHasJoined(true);
+        return;
+      }
+
+      const media = await provideStream(mode === "video");
+      if (!media) return;
+      setHasJoined(true);
+    };
+
+    void autoJoin();
+  }, [hasJoined, provideStream]);
 
   useEffect(() => {
     // Join the Socket.IO room as early as possible so the room exists/has identity

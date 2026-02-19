@@ -2,6 +2,8 @@
 import { useContext } from "react";
 import { SocketContext } from "../Context/socketContextValue";
 
+const HOME_JOIN_PREF_KEY = "home_join_pref_v1";
+
 const Home = () => {
   const { socket, provideStream, socketConnected } = useContext(SocketContext);
 
@@ -11,8 +13,23 @@ const Home = () => {
       return;
     }
 
+    const mode = isVideo ? "video" : "audio";
+    try {
+      sessionStorage.setItem(
+        HOME_JOIN_PREF_KEY,
+        JSON.stringify({ mode, ts: Date.now() })
+      );
+    } catch {
+      // noop
+    }
+
     const stream = await provideStream(isVideo);
     if (!stream) {
+      try {
+        sessionStorage.removeItem(HOME_JOIN_PREF_KEY);
+      } catch {
+        // noop
+      }
       alert("Camera/mic unavailable or blocked. Allow permissions, or use Start Remote Only.");
       return;
     }
@@ -24,6 +41,15 @@ const Home = () => {
     if (!socketConnected) {
       alert("Backend is not connected yet. Check VITE_SOCKET_URL and retry.");
       return;
+    }
+
+    try {
+      sessionStorage.setItem(
+        HOME_JOIN_PREF_KEY,
+        JSON.stringify({ mode: "none", ts: Date.now() })
+      );
+    } catch {
+      // noop
     }
 
     socket.emit("create-room");
