@@ -1,0 +1,82 @@
+.home-page,
+.room-join-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.home-shell,
+.room-join-shell {
+  width: min(880px, 100%);
+  padding: clamp(22px, 4vw, 40px);
+}
+
+.home-title {
+  font-size: clamp(1.8rem, 4.2vw, 2.7rem);
+  line-height: 1.12;
+}
+
+.home-subtitle,
+.room-join-subtitle {
+  margin-top: 12px;
+  color: var(--text-1);
+  max-width: 56ch;
+}
+
+.connection-pill {
+  margin-top: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text-1);
+  background: rgba(26, 40, 68, 0.7);
+  border: 1px solid var(--border-0);
+  border-radius: 999px;
+  padding: 6px 12px;
+}
+
+.connection-pill::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f39292;
+}
+
+.connection-pill--online::before {
+  background: #4bdfa0;
+}
+
+.home-actions,
+.room-join-actions {
+  margin-top: 24px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.home-action-btn {
+  min-height: 54px;
+}
+
+.btn-join {
+  min-height: 52px;
+}
+
+.btn-join--wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 700px) {
+  .home-actions,
+  .room-join-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .btn-join--wide {
+    grid-column: auto;
+  }
+}

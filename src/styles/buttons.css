@@ -1,0 +1,58 @@
+.btn {
+  border: 1px solid transparent;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: 0.95rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: var(--text-0);
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    filter 0.2s ease,
+    opacity 0.2s ease;
+}
+
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 22px rgba(8, 16, 31, 0.36);
+}
+
+.btn:active {
+  transform: translateY(0);
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.btn-default {
+  background: linear-gradient(180deg, #223256 0%, #1a2844 100%);
+  border-color: var(--border-0);
+}
+
+.btn-secondary {
+  background: linear-gradient(180deg, #2e4a77 0%, #243b63 100%);
+  border-color: rgba(157, 191, 255, 0.28);
+}
+
+.btn-primary,
+.btn-call-video {
+  background: linear-gradient(180deg, var(--brand-0) 0%, var(--brand-1) 100%);
+  border-color: rgba(145, 197, 255, 0.38);
+  color: #eef6ff;
+}
+
+.btn-call-audio {
+  background: linear-gradient(180deg, #45cf95 0%, #2daa77 100%);
+  border-color: rgba(148, 232, 201, 0.3);
+  color: #effff8;
+}
+
+.btn-danger {
+  background: linear-gradient(180deg, #ed7575 0%, #d95757 100%);
+  border-color: rgba(255, 179, 179, 0.28);
+  color: #fff5f5;
+}

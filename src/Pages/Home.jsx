@@ -31,29 +31,37 @@ const Home = () => {
 
   return (
     <div className="home-page">
-      <h1 className="home-title">Video/Audio Meeting App</h1>
+      <div className="home-shell panel">
+        <h1 className="home-title">Calling Workspace</h1>
+        <p className="home-subtitle">
+          Start a video or audio room, or open a remote-only room for desktop control workflows.
+        </p>
+        <div className={`connection-pill ${socketConnected ? "connection-pill--online" : ""}`}>
+          {socketConnected ? "Backend connected" : "Backend disconnected"}
+        </div>
 
-      <div className="home-actions">
-        <button
-          onClick={() => startCall(true)}
-          className="btn btn-call-video home-action-btn"
-        >
-          Start Video Call
-        </button>
+        <div className="home-actions">
+          <button
+            onClick={() => startCall(true)}
+            className="btn btn-call-video home-action-btn"
+          >
+            Start Video Call
+          </button>
 
-        <button
-          onClick={() => startCall(false)}
-          className="btn btn-call-audio home-action-btn"
-        >
-          Start Audio Call
-        </button>
+          <button
+            onClick={() => startCall(false)}
+            className="btn btn-call-audio home-action-btn"
+          >
+            Start Audio Call
+          </button>
 
-        <button
-          onClick={startRemoteOnly}
-          className="btn btn-default home-action-btn"
-        >
-          Start Remote Only
-        </button>
+          <button
+            onClick={startRemoteOnly}
+            className="btn btn-default home-action-btn"
+          >
+            Start Remote Only
+          </button>
+        </div>
       </div>
     </div>
   );

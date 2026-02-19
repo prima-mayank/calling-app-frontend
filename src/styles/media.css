@@ -1,0 +1,38 @@
+.user-feed {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  width: 100%;
+  max-width: 100%;
+}
+
+.user-feed-video {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+  border-radius: 9px;
+  border: 1px solid rgba(152, 182, 255, 0.2);
+  background: #000;
+  opacity: 1;
+}
+
+.user-feed-video--audio-only {
+  opacity: 0.42;
+}
+
+.user-feed-audio-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #e8f1ff;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+  border-radius: 9px;
+  background:
+    radial-gradient(circle at 30% 15%, rgba(52, 95, 168, 0.32), transparent 54%),
+    rgba(4, 10, 20, 0.22);
+}

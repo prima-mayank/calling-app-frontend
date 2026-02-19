@@ -1,5 +1,5 @@
 :root {
-  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+  font-family: "Space Grotesk", "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
   line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;
@@ -16,8 +16,8 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: #f7fafc;
-  color: #1a202c;
+  background: #060910;
+  color: #ecf3ff;
 }
 
 #root {
@@ -30,4 +30,8 @@ input,
 textarea,
 select {
   font: inherit;
+}
+
+a {
+  color: inherit;
 }

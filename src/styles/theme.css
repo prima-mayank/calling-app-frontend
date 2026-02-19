@@ -1,0 +1,60 @@
+:root {
+  --bg-0: #060910;
+  --bg-1: #0c1220;
+  --bg-2: #111a2e;
+  --surface-0: rgba(16, 26, 44, 0.72);
+  --surface-1: #131f36;
+  --surface-2: #1a2844;
+  --surface-3: #22365a;
+  --border-0: rgba(152, 182, 255, 0.24);
+  --border-1: rgba(152, 182, 255, 0.36);
+  --text-0: #ecf3ff;
+  --text-1: #c2d1ef;
+  --text-2: #91a5ca;
+  --brand-0: #4ca3ff;
+  --brand-1: #2188ff;
+  --success-0: #3ac18a;
+  --danger-0: #f16666;
+  --warning-0: #e8b15c;
+  --shadow-0: 0 18px 52px rgba(1, 5, 14, 0.55);
+  --radius-sm: 10px;
+  --radius-md: 14px;
+  --radius-lg: 18px;
+}
+
+body {
+  background:
+    radial-gradient(1000px 560px at 8% -6%, rgba(58, 104, 188, 0.25), transparent 60%),
+    radial-gradient(820px 500px at 88% 4%, rgba(35, 170, 154, 0.16), transparent 56%),
+    linear-gradient(180deg, var(--bg-1) 0%, var(--bg-0) 100%);
+  color: var(--text-0);
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  letter-spacing: 0.2px;
+}
+
+p {
+  margin: 0;
+}
+
+.panel {
+  background: var(--surface-0);
+  border: 1px solid var(--border-0);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-0);
+  backdrop-filter: blur(16px);
+}
+
+.muted-text {
+  color: var(--text-2);
+}
+
+.error-text {
+  color: #ff8b8b;
+  margin-bottom: 10px;
+}

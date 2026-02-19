@@ -2,7 +2,11 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
 import "./index.css";
-import "./styles/common.css";
+import "./styles/theme.css";
+import "./styles/buttons.css";
+import "./styles/home.css";
+import "./styles/room.css";
+import "./styles/media.css";
 import { BrowserRouter } from "react-router-dom";
 import { SocketProvider } from "./Context/SocketContext";
 

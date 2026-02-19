@@ -195,18 +195,23 @@ const Room = () => {
   if (!hasJoined) {
     return (
       <div className="room-join-page">
-        <h2>Join Room: {id}</h2>
-        <p>Choose how you want to join:</p>
-        <div className="room-join-actions">
-          <button onClick={() => handleJoinRoom("video")} className="btn btn-call-video btn-join">
-            Join with Video
-          </button>
-          <button onClick={() => handleJoinRoom("audio")} className="btn btn-call-audio btn-join">
-            Join Audio Only
-          </button>
-          <button onClick={() => handleJoinRoom("none")} className="btn btn-default btn-join">
-            Join Without Media (Remote Only)
-          </button>
+        <div className="room-join-shell panel">
+          <h2>Join Room: {id}</h2>
+          <p className="room-join-subtitle">Choose how you want to join this room.</p>
+          <div className="room-join-actions">
+            <button onClick={() => handleJoinRoom("video")} className="btn btn-call-video btn-join">
+              Join with Video
+            </button>
+            <button onClick={() => handleJoinRoom("audio")} className="btn btn-call-audio btn-join">
+              Join Audio Only
+            </button>
+            <button
+              onClick={() => handleJoinRoom("none")}
+              className="btn btn-default btn-join btn-join--wide"
+            >
+              Join Without Media (Remote Only)
+            </button>
+          </div>
         </div>
       </div>
     );

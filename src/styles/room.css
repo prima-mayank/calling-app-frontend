@@ -1,0 +1,203 @@
+.room-page {
+  width: 100%;
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: clamp(12px, 2.2vw, 24px);
+}
+
+.room-title {
+  font-size: clamp(1.02rem, 2.2vw, 1.35rem);
+  margin-bottom: 12px;
+  word-break: break-word;
+  color: var(--text-1);
+}
+
+.room-toolbar {
+  margin-bottom: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: rgba(22, 36, 62, 0.76);
+  border: 1px solid var(--border-0);
+}
+
+.remote-card {
+  margin-bottom: 18px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-0);
+  background: linear-gradient(180deg, rgba(24, 38, 65, 0.88), rgba(19, 31, 54, 0.86));
+  box-shadow: var(--shadow-0);
+}
+
+.remote-card-header {
+  padding: 16px 16px 12px;
+  border-bottom: 1px solid rgba(153, 185, 255, 0.15);
+}
+
+.remote-card-title {
+  font-size: 1.1rem;
+}
+
+.remote-card-subtitle {
+  margin-top: 8px;
+  color: var(--text-2);
+}
+
+.remote-card-body {
+  padding: 16px;
+}
+
+.remote-connect-row,
+.remote-status-row {
+  margin-bottom: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.remote-connect-btn {
+  min-height: 44px;
+}
+
+.remote-host-label {
+  color: var(--text-1);
+  font-weight: 700;
+  word-break: break-word;
+}
+
+.host-app-prompt {
+  margin-bottom: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(255, 189, 109, 0.34);
+  background: linear-gradient(180deg, rgba(64, 46, 18, 0.58), rgba(47, 34, 13, 0.5));
+}
+
+.host-app-prompt-title {
+  font-weight: 800;
+  color: #ffd9a4;
+  margin-bottom: 6px;
+}
+
+.host-app-prompt-text {
+  color: #ffd9a4;
+  font-size: 0.92rem;
+}
+
+.host-app-prompt-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.remote-surface {
+  width: 100%;
+  max-width: 1180px;
+  min-height: clamp(220px, 44vw, 460px);
+  border-radius: var(--radius-md);
+  border: 2px solid #233964;
+  background:
+    radial-gradient(circle at 16% 14%, rgba(74, 130, 224, 0.16), transparent 52%),
+    #0b101a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  user-select: none;
+  touch-action: none;
+}
+
+.remote-surface--active {
+  border-color: #58a9ff;
+  box-shadow: 0 0 0 3px rgba(88, 169, 255, 0.19);
+}
+
+.remote-surface-frame {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: contain;
+  cursor: pointer;
+}
+
+.remote-surface-frame--active {
+  cursor: crosshair;
+}
+
+.remote-surface-empty {
+  text-align: center;
+  padding: 24px;
+  color: var(--text-1);
+}
+
+.remote-surface-empty-title {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.remote-surface-empty-subtitle {
+  margin-top: 6px;
+  font-size: 0.88rem;
+  color: var(--text-2);
+}
+
+.remote-surface-badge {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #edf5ff;
+  background: rgba(12, 21, 38, 0.68);
+  border: 1px solid rgba(157, 191, 255, 0.34);
+}
+
+.feeds-layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 370px) minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.feed-section {
+  min-width: 0;
+  padding: 14px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-0);
+  background: rgba(19, 31, 54, 0.74);
+}
+
+.feed-title {
+  margin-bottom: 10px;
+  color: var(--text-1);
+}
+
+.participants-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  width: 100%;
+}
+
+.participant-card {
+  width: 100%;
+  min-width: 0;
+  padding: 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(154, 186, 255, 0.2);
+  background: rgba(14, 22, 37, 0.76);
+}
+
+@media (max-width: 900px) {
+  .feeds-layout {
+    grid-template-columns: 1fr;
+  }
+}
