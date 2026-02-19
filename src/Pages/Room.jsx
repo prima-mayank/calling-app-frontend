@@ -69,6 +69,7 @@ const Room = () => {
 
   const [hasJoined, setHasJoined] = useState(false);
   const [remoteInputActive, setRemoteInputActive] = useState(false);
+  const [showRemotePanel, setShowRemotePanel] = useState(false);
   const moveThrottleRef = useRef(0);
   const remoteSurfaceRef = useRef(null);
   const remoteFrameRef = useRef(null);
@@ -191,6 +192,15 @@ const Room = () => {
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [remoteInputActive, remoteDesktopSession, sendRemoteDesktopInput]);
+
+  const hasRemoteActivity = !!(
+    remoteDesktopSession ||
+    remoteDesktopPendingRequest ||
+    incomingRemoteDesktopRequest ||
+    remoteDesktopError ||
+    hostAppInstallPrompt ||
+    remoteDesktopFrame
+  );
 
   if (!hasJoined) {
     return (
@@ -367,6 +377,7 @@ const Room = () => {
   };
 
   const isControlActive = remoteInputActive && !!remoteDesktopSession;
+  const shouldShowRemotePanel = showRemotePanel || hasRemoteActivity;
   const hasVideoTrack = !!stream && stream.getVideoTracks().length > 0;
 
   const getPrimaryTouch = (event) => event.touches?.[0] || event.changedTouches?.[0];
@@ -493,6 +504,10 @@ const Room = () => {
           </button>
         )}
 
+        <button onClick={() => setShowRemotePanel((prev) => !prev)} className="btn btn-default">
+          {shouldShowRemotePanel ? "Hide Remote Panel" : "Remote Control"}
+        </button>
+
         <button onClick={() => endCall(id)} className="btn btn-danger">
           End Call
         </button>
@@ -523,147 +538,154 @@ const Room = () => {
         </button>
       </div>
 
-      <div className="remote-card">
-        <div className="remote-card-header">
-          <h4 className="remote-card-title">Full Remote Desktop (Host Agent)</h4>
-          <p className="remote-card-subtitle">
-            Request remote control from an available host agent.
-          </p>
-        </div>
-
-        <div className="remote-card-body">
-          {!remoteDesktopSession && (
-            <div className="remote-connect-row">
-              <button
-                onClick={connectRemoteDesktop}
-                disabled={!!remoteDesktopPendingRequest}
-                className="btn btn-primary remote-connect-btn"
-              >
-                {remoteDesktopPendingRequest ? "Waiting for Approval..." : "Request Remote Control"}
+      {shouldShowRemotePanel && (
+        <div className="remote-card">
+          <div className="remote-card-header">
+            <div className="remote-card-top">
+              <h4 className="remote-card-title">Full Remote Desktop (Host Agent)</h4>
+              <button onClick={() => setShowRemotePanel(false)} className="btn btn-default remote-hide-btn">
+                Close
               </button>
-              {remoteDesktopPendingRequest && (
-                <button onClick={stopRemoteDesktopSession} className="btn btn-danger remote-connect-btn">
-                  Cancel Request
+            </div>
+            <p className="remote-card-subtitle">
+              Request remote control from an available host agent.
+            </p>
+          </div>
+
+          <div className="remote-card-body">
+            {!remoteDesktopSession && (
+              <div className="remote-connect-row">
+                <button
+                  onClick={connectRemoteDesktop}
+                  disabled={!!remoteDesktopPendingRequest}
+                  className="btn btn-primary remote-connect-btn"
+                >
+                  {remoteDesktopPendingRequest ? "Waiting for Approval..." : "Request Remote Control"}
                 </button>
-              )}
-            </div>
-          )}
-
-          {remoteDesktopSession && (
-            <div className="remote-status-row">
-              <div className="remote-host-label">Connected to host: {remoteDesktopSession.hostId}</div>
-              <button onClick={stopRemoteDesktopSession} className="btn btn-danger">
-                Disconnect Desktop
-              </button>
-            </div>
-          )}
-
-          {remoteDesktopError && <div className="error-text">{remoteDesktopError}</div>}
-          {hostAppInstallPrompt && (
-            <div className="host-app-prompt">
-              <div className="host-app-prompt-title">Host App Required</div>
-              <div className="host-app-prompt-text">
-                {hostAppInstallPrompt.message}
-              </div>
-              <div className="host-app-prompt-text">
-                Ask the other user to install and run the host app, then retry.
-              </div>
-              <div className="host-app-prompt-actions">
-                {!!hostAppInstallPrompt.downloadUrl && (
-                  <button
-                    onClick={() =>
-                      window.open(hostAppInstallPrompt.downloadUrl, "_blank", "noopener,noreferrer")
-                    }
-                    className="btn btn-primary"
-                  >
-                    Download Host App
+                {remoteDesktopPendingRequest && (
+                  <button onClick={stopRemoteDesktopSession} className="btn btn-danger remote-connect-btn">
+                    Cancel Request
                   </button>
                 )}
-                <button
-                  onClick={() => {
-                    dismissHostAppInstallPrompt();
-                    requestRemoteDesktopSession();
-                  }}
-                  className="btn btn-default"
-                >
-                  Retry Request
-                </button>
-              </div>
-            </div>
-          )}
-          {incomingRemoteDesktopRequest && (
-            <div className="remote-status-row">
-              <div className="remote-host-label">
-                {incomingRemoteDesktopRequest.requesterId} requested remote control.
-              </div>
-              <button
-                onClick={() => respondToRemoteDesktopRequest(true)}
-                className="btn btn-primary"
-              >
-                Accept
-              </button>
-              <button
-                onClick={() => respondToRemoteDesktopRequest(false)}
-                className="btn btn-danger"
-              >
-                Reject
-              </button>
-            </div>
-          )}
-          {remoteDesktopPendingRequest && !remoteDesktopSession && (
-            <div className="muted-text">
-              Request sent to host {remoteDesktopPendingRequest.hostId}. Waiting for other participant approval.
-            </div>
-          )}
-
-          <div
-            ref={remoteSurfaceRef}
-            tabIndex={0}
-            onClick={(event) => {
-              if (!remoteDesktopSession) return;
-              setRemoteInputActive(true);
-              handleRemoteClick(event);
-            }}
-            onMouseMove={handleRemoteMove}
-            onMouseDown={handleRemoteMouseDown}
-            onMouseUp={handleRemoteMouseUp}
-            onWheel={handleRemoteWheel}
-            onTouchStart={handleTouchStart}
-            onTouchMove={handleTouchMove}
-            onTouchEnd={handleTouchEnd}
-            onTouchCancel={handleTouchCancel}
-            onContextMenu={(event) => event.preventDefault()}
-            className={`remote-surface ${isControlActive ? "remote-surface--active" : ""}`}
-          >
-            {remoteDesktopFrame ? (
-              <img
-                ref={remoteFrameRef}
-                src={remoteDesktopFrame}
-                alt="Remote desktop"
-                className={`remote-surface-frame ${
-                  isControlActive ? "remote-surface-frame--active" : ""
-                }`}
-                draggable={false}
-              />
-            ) : (
-              <div className="remote-surface-empty">
-                <div className="remote-surface-empty-title">
-                  {remoteDesktopSession ? "Waiting for host frames..." : "No active desktop session"}
-                </div>
-                <div className="remote-surface-empty-subtitle">
-                  Click the panel after connect to start keyboard and mouse control.
-                </div>
               </div>
             )}
 
             {remoteDesktopSession && (
-              <div className="remote-surface-badge">
-                {isControlActive ? "Control Active (Esc to release)" : "Click to Control"}
+              <div className="remote-status-row">
+                <div className="remote-host-label">Connected to host: {remoteDesktopSession.hostId}</div>
+                <button onClick={stopRemoteDesktopSession} className="btn btn-danger">
+                  Disconnect Desktop
+                </button>
               </div>
             )}
+
+            {remoteDesktopError && <div className="error-text">{remoteDesktopError}</div>}
+            {hostAppInstallPrompt && (
+              <div className="host-app-prompt">
+                <div className="host-app-prompt-title">Host App Required</div>
+                <div className="host-app-prompt-text">
+                  {hostAppInstallPrompt.message}
+                </div>
+                <div className="host-app-prompt-text">
+                  Ask the other user to install and run the host app, then retry.
+                </div>
+                <div className="host-app-prompt-actions">
+                  {!!hostAppInstallPrompt.downloadUrl && (
+                    <button
+                      onClick={() =>
+                        window.open(hostAppInstallPrompt.downloadUrl, "_blank", "noopener,noreferrer")
+                      }
+                      className="btn btn-primary"
+                    >
+                      Download Host App
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      dismissHostAppInstallPrompt();
+                      requestRemoteDesktopSession();
+                    }}
+                    className="btn btn-default"
+                  >
+                    Retry Request
+                  </button>
+                </div>
+              </div>
+            )}
+            {incomingRemoteDesktopRequest && (
+              <div className="remote-status-row">
+                <div className="remote-host-label">
+                  {incomingRemoteDesktopRequest.requesterId} requested remote control.
+                </div>
+                <button
+                  onClick={() => respondToRemoteDesktopRequest(true)}
+                  className="btn btn-primary"
+                >
+                  Accept
+                </button>
+                <button
+                  onClick={() => respondToRemoteDesktopRequest(false)}
+                  className="btn btn-danger"
+                >
+                  Reject
+                </button>
+              </div>
+            )}
+            {remoteDesktopPendingRequest && !remoteDesktopSession && (
+              <div className="muted-text">
+                Request sent to host {remoteDesktopPendingRequest.hostId}. Waiting for other participant approval.
+              </div>
+            )}
+
+            <div
+              ref={remoteSurfaceRef}
+              tabIndex={0}
+              onClick={(event) => {
+                if (!remoteDesktopSession) return;
+                setRemoteInputActive(true);
+                handleRemoteClick(event);
+              }}
+              onMouseMove={handleRemoteMove}
+              onMouseDown={handleRemoteMouseDown}
+              onMouseUp={handleRemoteMouseUp}
+              onWheel={handleRemoteWheel}
+              onTouchStart={handleTouchStart}
+              onTouchMove={handleTouchMove}
+              onTouchEnd={handleTouchEnd}
+              onTouchCancel={handleTouchCancel}
+              onContextMenu={(event) => event.preventDefault()}
+              className={`remote-surface ${isControlActive ? "remote-surface--active" : ""}`}
+            >
+              {remoteDesktopFrame ? (
+                <img
+                  ref={remoteFrameRef}
+                  src={remoteDesktopFrame}
+                  alt="Remote desktop"
+                  className={`remote-surface-frame ${
+                    isControlActive ? "remote-surface-frame--active" : ""
+                  }`}
+                  draggable={false}
+                />
+              ) : (
+                <div className="remote-surface-empty">
+                  <div className="remote-surface-empty-title">
+                    {remoteDesktopSession ? "Waiting for host frames..." : "No active desktop session"}
+                  </div>
+                  <div className="remote-surface-empty-subtitle">
+                    Click the panel after connect to start keyboard and mouse control.
+                  </div>
+                </div>
+              )}
+
+              {remoteDesktopSession && (
+                <div className="remote-surface-badge">
+                  {isControlActive ? "Control Active (Esc to release)" : "Click to Control"}
+                </div>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
 
       <div className="feeds-layout">
         <div className="feed-section">

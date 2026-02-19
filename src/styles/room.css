@@ -37,8 +37,19 @@
   border-bottom: 1px solid rgba(153, 185, 255, 0.15);
 }
 
+.remote-card-top {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .remote-card-title {
   font-size: 1.1rem;
+}
+
+.remote-hide-btn {
+  min-height: 36px;
 }
 
 .remote-card-subtitle {
