@@ -443,7 +443,7 @@ const Room = () => {
       return;
     }
     if (selectedRemoteHostOwnership !== "other") {
-      alert("Host must be claimed first. On owner side, click 'Claim As My Host'.");
+      alert("The other participant must claim this host before you can request control.");
       return;
     }
     if (selectedRemoteHost?.busy) {
@@ -459,14 +459,13 @@ const Room = () => {
   const otherParticipants = roomParticipants.filter(
     (participantId) => participantId && participantId !== user?.id
   );
-  const effectiveSelectedRemoteHostId = remoteHosts.some(
+  const hasExplicitHostSelection = remoteHosts.some(
     (host) => host.hostId === selectedRemoteHostId
-  )
-    ? selectedRemoteHostId
-    : "";
-  const selectedRemoteHost = remoteHosts.find(
-    (host) => host.hostId === effectiveSelectedRemoteHostId
   );
+  const effectiveSelectedRemoteHostId = hasExplicitHostSelection ? selectedRemoteHostId : "";
+  const selectedRemoteHost = hasExplicitHostSelection
+    ? remoteHosts.find((host) => host.hostId === selectedRemoteHostId) || null
+    : null;
   const selectedRemoteHostOwnership = selectedRemoteHost?.ownership || "unclaimed";
   const canClaimSelectedHost =
     !!effectiveSelectedRemoteHostId && selectedRemoteHostOwnership !== "other";
@@ -767,12 +766,14 @@ const Room = () => {
                     >
                       {remoteDesktopPendingRequest
                         ? "Waiting for Approval..."
+                        : !effectiveSelectedRemoteHostId
+                        ? "Select Host"
                         : selectedRemoteHost?.busy
                         ? "Host Busy"
+                        : selectedRemoteHostOwnership === "unclaimed"
+                        ? "Host Must Be Claimed"
                         : selectedRemoteHostOwnership === "you"
                         ? "Other User Must Request"
-                        : selectedRemoteHostOwnership === "unclaimed"
-                        ? "Claim Host First"
                         : "Request Remote Control"}
                     </button>
                     {remoteDesktopPendingRequest && (
@@ -782,7 +783,8 @@ const Room = () => {
                     )}
                     <div className="muted-text">
                       Host tags: <strong>You</strong> means claimed by you, <strong>Other</strong>{" "}
-                      means claimed by the other participant.
+                      means claimed by the other participant, <strong>Unclaimed</strong> means
+                      someone still needs to claim the host before requesting control.
                     </div>
                   </div>
                 ) : (
@@ -859,7 +861,21 @@ const Room = () => {
                       }
                       className="btn btn-primary"
                     >
-                      Download Host App
+                      {hostAppInstallPrompt.downloadLabel || "Download Host App"}
+                    </button>
+                  )}
+                  {!!hostAppInstallPrompt.alternateDownloadUrl && (
+                    <button
+                      onClick={() =>
+                        window.open(
+                          hostAppInstallPrompt.alternateDownloadUrl,
+                          "_blank",
+                          "noopener,noreferrer"
+                        )
+                      }
+                      className="btn btn-default"
+                    >
+                      {hostAppInstallPrompt.alternateDownloadLabel || "Download Alternate Host App"}
                     </button>
                   )}
                   <button

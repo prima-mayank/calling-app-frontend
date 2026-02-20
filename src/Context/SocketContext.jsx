@@ -16,11 +16,13 @@ const REMOTE_CONTROL_TOKEN = import.meta.env.VITE_REMOTE_CONTROL_TOKEN || "";
 const HOST_APP_DOWNLOAD_URL =
   import.meta.env.VITE_HOST_APP_DOWNLOAD_URL ||
   "https://github.com/prima-mayank/remote-agent/releases/latest/download/host-app-win.zip";
+const HOST_APP_DOWNLOAD_URL_LOCAL = String(
+  import.meta.env.VITE_HOST_APP_DOWNLOAD_URL_LOCAL || ""
+).trim();
 const HOST_APP_PROTOCOL_URL = String(import.meta.env.VITE_HOST_APP_PROTOCOL_URL || "").trim();
 const HOST_APP_REQUIRED_ERROR_CODES = new Set([
   "host-not-found",
   "host-offline",
-  "host-owner-unclaimed",
 ]);
 const REMOTE_DEBUG_ENABLED = String(import.meta.env.VITE_REMOTE_DEBUG || "").trim() === "1";
 
@@ -33,10 +35,73 @@ const buildHostAppLaunchUrl = (hostId = "") => {
     if (hostId) {
       launchUrl.searchParams.set("hostId", hostId);
     }
+    if (REMOTE_CONTROL_TOKEN) {
+      launchUrl.searchParams.set("token", REMOTE_CONTROL_TOKEN);
+    }
     return launchUrl.toString();
   } catch {
     return "";
   }
+};
+
+const isLocalSocketServer = (url) => {
+  try {
+    const parsed = new URL(url);
+    const host = String(parsed.hostname || "").toLowerCase();
+    return host === "localhost" || host === "127.0.0.1";
+  } catch {
+    return false;
+  }
+};
+
+const normalizeHttpDownloadUrl = (url) => {
+  const raw = String(url || "").trim();
+  if (!raw) return "";
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const parsed = new URL(raw, base);
+    const protocol = String(parsed.protocol || "").toLowerCase();
+    if (protocol !== "http:" && protocol !== "https:") return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+};
+
+const buildLocalDownloadUrlFromSocketServer = () => {
+  try {
+    const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+    const parsed = new URL(WS_SERVER, base);
+    parsed.pathname = "/downloads/host-app-win.zip";
+    parsed.search = "";
+    parsed.hash = "";
+    return normalizeHttpDownloadUrl(parsed.toString());
+  } catch {
+    return "";
+  }
+};
+
+const buildHostDownloadTargets = () => {
+  const cloudUrl = normalizeHttpDownloadUrl(HOST_APP_DOWNLOAD_URL);
+  const configuredLocalUrl = normalizeHttpDownloadUrl(HOST_APP_DOWNLOAD_URL_LOCAL);
+  const localUrl = configuredLocalUrl || buildLocalDownloadUrlFromSocketServer();
+  const preferLocal = isLocalSocketServer(WS_SERVER) && !!localUrl;
+
+  const primaryUrl = preferLocal ? localUrl : cloudUrl || localUrl;
+  const secondaryUrl =
+    primaryUrl === localUrl
+      ? cloudUrl
+      : primaryUrl === cloudUrl
+      ? localUrl
+      : "";
+
+  return {
+    primaryUrl,
+    secondaryUrl,
+    primaryLabel: primaryUrl === localUrl ? "Download Host App (Local)" : "Download Host App (Cloud)",
+    secondaryLabel:
+      secondaryUrl === localUrl ? "Download Host App (Local)" : "Download Host App (Cloud)",
+  };
 };
 
 const shouldInitiateCall = (localPeerId, remotePeerId) => {
@@ -116,6 +181,7 @@ export const SocketProvider = ({ children }) => {
   const autoClaimRemoteHostIdRef = useRef("");
   const autoRequestRemoteHostIdRef = useRef("");
   const remoteDesktopPendingRequestRef = useRef(null);
+  const remoteHostsRef = useRef([]);
   const remoteInputDebugRef = useRef({ count: 0, lastLoggedAt: 0 });
   const screenShareTrackRef = useRef(null);
   const cameraTrackBeforeShareRef = useRef(null);
@@ -173,6 +239,10 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     remoteDesktopPendingRequestRef.current = remoteDesktopPendingRequest;
   }, [remoteDesktopPendingRequest]);
+
+  useEffect(() => {
+    remoteHostsRef.current = remoteHosts;
+  }, [remoteHosts]);
 
   const refreshRemoteHosts = useCallback(() => {
     logRemote("request-hosts-list");
@@ -379,6 +449,7 @@ export const SocketProvider = ({ children }) => {
 
     const suggestedHostId = String(incomingRemoteHostSetupRequest.suggestedHostId || "").trim();
     const launchUrl = buildHostAppLaunchUrl(suggestedHostId);
+    const downloadTargets = buildHostDownloadTargets();
 
     socket.emit("remote-host-setup-decision", {
       requestId: incomingRemoteHostSetupRequest.requestId,
@@ -389,17 +460,33 @@ export const SocketProvider = ({ children }) => {
       if (launchUrl) {
         window.open(launchUrl, "_blank", "noopener,noreferrer");
       }
-      window.open(HOST_APP_DOWNLOAD_URL, "_blank", "noopener,noreferrer");
+      if (downloadTargets.primaryUrl) {
+        const launchFirstDelayMs = launchUrl ? 2200 : 0;
+        window.setTimeout(() => {
+          const hostAlreadyOnline =
+            !!suggestedHostId &&
+            remoteHostsRef.current.some(
+              (host) => host.hostId === suggestedHostId
+            );
+          if (hostAlreadyOnline) return;
+          window.open(downloadTargets.primaryUrl, "_blank", "noopener,noreferrer");
+        }, launchFirstDelayMs);
+      }
       setAutoClaimRemoteHostId(suggestedHostId);
       setHostAppInstallPrompt({
         message: suggestedHostId
           ? `Setup accepted. Start the host app on this device with host ID '${suggestedHostId}'.`
           : "Setup accepted. Start the host app on this device.",
-        downloadUrl: HOST_APP_DOWNLOAD_URL,
+        downloadUrl: downloadTargets.primaryUrl,
+        downloadLabel: downloadTargets.primaryLabel,
+        alternateDownloadUrl: downloadTargets.secondaryUrl,
+        alternateDownloadLabel: downloadTargets.secondaryLabel,
         launchUrl,
       });
       setRemoteHostSetupStatus(
-        "Host setup accepted. Download opened. Start the host app and keep it running."
+        launchUrl
+          ? "Host setup accepted. Launch requested; download opens automatically if app is not installed/running."
+          : "Host setup accepted. Download opened. Start the host app and keep it running."
       );
     }
 
@@ -719,9 +806,13 @@ export const SocketProvider = ({ children }) => {
       setRemoteHostSetupPending(null);
 
       if (HOST_APP_REQUIRED_ERROR_CODES.has(String(code || "").trim())) {
+        const downloadTargets = buildHostDownloadTargets();
         setHostAppInstallPrompt({
           message: normalizedMessage,
-          downloadUrl: HOST_APP_DOWNLOAD_URL,
+          downloadUrl: downloadTargets.primaryUrl,
+          downloadLabel: downloadTargets.primaryLabel,
+          alternateDownloadUrl: downloadTargets.secondaryUrl,
+          alternateDownloadLabel: downloadTargets.secondaryLabel,
         });
         return;
       }
