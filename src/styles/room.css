@@ -166,6 +166,73 @@
   min-height: 44px;
 }
 
+.remote-diagnostics {
+  margin-top: 8px;
+  width: 100%;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(153, 185, 255, 0.22);
+  background: rgba(10, 18, 31, 0.45);
+}
+
+.remote-diagnostics-title {
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+.remote-diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px;
+}
+
+.remote-diag-item {
+  min-width: 0;
+  padding: 8px;
+  border-radius: 10px;
+  background: rgba(11, 19, 34, 0.56);
+  border: 1px solid rgba(126, 160, 224, 0.2);
+}
+
+.remote-diag-label {
+  font-size: 0.74rem;
+  color: var(--text-2);
+  margin-bottom: 4px;
+}
+
+.remote-diag-value {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-1);
+  word-break: break-word;
+}
+
+.remote-diag-value--ok {
+  color: #9df2c0;
+}
+
+.remote-diag-value--warn {
+  color: #ffd791;
+}
+
+.remote-diag-value--bad {
+  color: #ff9d9d;
+}
+
+.remote-diag-value--muted {
+  color: var(--text-2);
+}
+
+.remote-diag-detail {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: var(--text-2);
+}
+
 .remote-host-label {
   color: var(--text-1);
   font-weight: 700;

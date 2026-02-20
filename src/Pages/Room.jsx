@@ -67,6 +67,7 @@ const Room = () => {
     remoteDesktopFrame,
     remoteDesktopError,
     hostAppInstallPrompt,
+    socketConnected,
     provideStream,
     toggleMic,
     toggleCamera,
@@ -475,6 +476,65 @@ const Room = () => {
     !selectedRemoteHost.busy &&
     !remoteDesktopPendingRequest &&
     selectedRemoteHostOwnership === "other";
+  const remoteRequestBlockReason = (() => {
+    if (remoteDesktopSession) return "Session already active.";
+    if (remoteDesktopPendingRequest) return "A request is already pending.";
+    if (!effectiveSelectedRemoteHostId || !selectedRemoteHost) {
+      return "Select a host first.";
+    }
+    if (selectedRemoteHost.busy) return "Selected host is busy.";
+    if (selectedRemoteHostOwnership === "you") {
+      return "Host is claimed by you. Other user must request.";
+    }
+    if (selectedRemoteHostOwnership !== "other") {
+      return "Host must be claimed by the other participant.";
+    }
+    return "Ready to request.";
+  })();
+  const diagnosticsItems = [
+    {
+      key: "socket",
+      label: "Socket",
+      value: socketConnected ? "Connected" : "Disconnected",
+      tone: socketConnected ? "ok" : "bad",
+    },
+    {
+      key: "selected-host",
+      label: "Selected Host",
+      value: effectiveSelectedRemoteHostId || "None",
+      tone: effectiveSelectedRemoteHostId ? "ok" : "warn",
+    },
+    {
+      key: "ownership",
+      label: "Ownership",
+      value: getHostOwnershipLabel(selectedRemoteHostOwnership),
+      tone:
+        selectedRemoteHostOwnership === "other"
+          ? "ok"
+          : selectedRemoteHostOwnership === "you"
+          ? "bad"
+          : "warn",
+    },
+    {
+      key: "can-request",
+      label: "Request",
+      value: canRequestSelectedHost ? "Ready" : "Blocked",
+      tone: canRequestSelectedHost ? "ok" : "warn",
+      detail: remoteRequestBlockReason,
+    },
+    {
+      key: "claimed-host",
+      label: "My Claimed Host",
+      value: claimedRemoteHostId || "None",
+      tone: claimedRemoteHostId ? "ok" : "muted",
+    },
+    {
+      key: "hosts-online",
+      label: "Hosts Online",
+      value: String(remoteHosts.length),
+      tone: remoteHosts.length > 0 ? "ok" : "warn",
+    },
+  ];
   const effectiveSetupPeerId = otherParticipants.includes(selectedSetupPeerId)
     ? selectedSetupPeerId
     : otherParticipants.length === 1
@@ -785,6 +845,22 @@ const Room = () => {
                       Host tags: <strong>You</strong> means claimed by you, <strong>Other</strong>{" "}
                       means claimed by the other participant, <strong>Unclaimed</strong> means
                       someone still needs to claim the host before requesting control.
+                    </div>
+                    <div className="remote-diagnostics">
+                      <div className="remote-diagnostics-title">Remote Diagnostics</div>
+                      <div className="remote-diagnostics-grid">
+                        {diagnosticsItems.map((item) => (
+                          <div key={item.key} className="remote-diag-item">
+                            <div className="remote-diag-label">{item.label}</div>
+                            <div className={`remote-diag-value remote-diag-value--${item.tone}`}>
+                              {item.value}
+                            </div>
+                            {!!item.detail && (
+                              <div className="remote-diag-detail">{item.detail}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 ) : (
