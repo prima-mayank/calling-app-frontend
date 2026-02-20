@@ -542,7 +542,6 @@ const Room = () => {
     : hasVideoTrack
     ? "Video Call"
     : "Audio Call";
-  const isZoomed = (targetId) => zoomTarget === targetId;
   const toggleZoom = (targetId) => {
     setZoomTarget((prev) => (prev === targetId ? "" : targetId));
   };
@@ -565,11 +564,7 @@ const Room = () => {
   ];
 
   const effectiveZoomTarget =
-    zoomTarget.startsWith("peer:") && !peers[zoomTarget.slice(5)]
-      ? ""
-      : zoomTarget === "remote" && !shouldShowRemotePanel
-      ? ""
-      : zoomTarget;
+    zoomTarget.startsWith("peer:") && !peers[zoomTarget.slice(5)] ? "" : zoomTarget;
 
   const activeVideoTile = videoTiles.find((tile) => tile.id === effectiveZoomTarget) || null;
   const isVideoSpotlightActive = !!activeVideoTile;
@@ -746,7 +741,7 @@ const Room = () => {
       </div>
 
       {shouldShowRemotePanel && (
-        <div className={`remote-card ${isZoomed("remote") ? "remote-card--zoomed" : ""} ${isVideoSpotlightActive ? "remote-card--dimmed" : ""}`}>
+        <div className={`remote-card ${isVideoSpotlightActive ? "remote-card--dimmed" : ""}`}>
           <div className="remote-card-header">
             <div className="remote-card-top">
               <h4 className="remote-card-title">Full Remote Desktop (Host Agent)</h4>
