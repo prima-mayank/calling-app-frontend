@@ -1,6 +1,6 @@
 .btn {
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-sm);
   padding: 10px 16px;
   font-size: 0.95rem;
   font-weight: 700;
@@ -15,7 +15,7 @@
 
 .btn:hover {
   transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(8, 16, 31, 0.36);
+  box-shadow: 0 8px 22px rgba(4, 13, 26, 0.42);
 }
 
 .btn:active {
@@ -29,30 +29,30 @@
 }
 
 .btn-default {
-  background: linear-gradient(180deg, #223256 0%, #1a2844 100%);
+  background: linear-gradient(180deg, var(--surface-3) 0%, var(--surface-2) 100%);
   border-color: var(--border-0);
 }
 
 .btn-secondary {
-  background: linear-gradient(180deg, #2e4a77 0%, #243b63 100%);
-  border-color: rgba(157, 191, 255, 0.28);
+  background: linear-gradient(180deg, #375a84 0%, #2c4b70 100%);
+  border-color: var(--border-1);
 }
 
 .btn-primary,
 .btn-call-video {
   background: linear-gradient(180deg, var(--brand-0) 0%, var(--brand-1) 100%);
-  border-color: rgba(145, 197, 255, 0.38);
-  color: #eef6ff;
+  border-color: rgba(168, 213, 255, 0.4);
+  color: #f2f8ff;
 }
 
 .btn-call-audio {
-  background: linear-gradient(180deg, #45cf95 0%, #2daa77 100%);
-  border-color: rgba(148, 232, 201, 0.3);
-  color: #effff8;
+  background: linear-gradient(180deg, var(--success-0) 0%, var(--success-1) 100%);
+  border-color: rgba(164, 232, 205, 0.34);
+  color: #f1fff8;
 }
 
 .btn-danger {
-  background: linear-gradient(180deg, #ed7575 0%, #d95757 100%);
-  border-color: rgba(255, 179, 179, 0.28);
-  color: #fff5f5;
+  background: linear-gradient(180deg, var(--danger-0) 0%, var(--danger-1) 100%);
+  border-color: rgba(255, 184, 184, 0.32);
+  color: #fff6f6;
 }

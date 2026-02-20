@@ -14,11 +14,6 @@ const TOUCH_TAP_MAX_MOVE = 0.015;
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 const HOME_JOIN_PREF_KEY = "home_join_pref_v1";
 const HOME_JOIN_PREF_MAX_AGE_MS = 5 * 60 * 1000;
-const getHostOwnershipLabel = (ownership) => {
-  if (ownership === "you") return "You";
-  if (ownership === "other") return "Other";
-  return "Unclaimed";
-};
 
 const copyTextFallback = async (text) => {
   if (navigator.clipboard?.writeText) {
@@ -59,15 +54,13 @@ const Room = () => {
     remoteDesktopPendingRequest,
     remoteHosts,
     roomParticipants,
-    claimedRemoteHostId,
     incomingRemoteDesktopRequest,
     incomingRemoteHostSetupRequest,
     remoteHostSetupPending,
     remoteHostSetupStatus,
-    remoteDesktopFrame,
+    hasRemoteDesktopFrame,
     remoteDesktopError,
     hostAppInstallPrompt,
-    socketConnected,
     provideStream,
     toggleMic,
     toggleCamera,
@@ -76,11 +69,11 @@ const Room = () => {
     requestRemoteDesktopSession,
     requestRemoteHostSetup,
     claimRemoteHost,
-    refreshRemoteHosts,
     stopRemoteDesktopSession,
     dismissHostAppInstallPrompt,
     respondToRemoteDesktopRequest,
     respondToRemoteHostSetupRequest,
+    subscribeRemoteDesktopFrame,
     sendRemoteDesktopInput,
     endCall,
   } = useContext(SocketContext);
@@ -94,6 +87,7 @@ const Room = () => {
   const moveThrottleRef = useRef(0);
   const remoteSurfaceRef = useRef(null);
   const remoteFrameRef = useRef(null);
+  const latestRemoteFrameDataUrlRef = useRef("");
   const touchStateRef = useRef({
     active: false,
     moved: false,
@@ -169,6 +163,34 @@ const Room = () => {
       peerId: user.id,
     });
   }, [id, user, socket]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeRemoteDesktopFrame((frameDataUrl) => {
+      latestRemoteFrameDataUrlRef.current = frameDataUrl;
+
+      const frameElement = remoteFrameRef.current;
+      if (frameElement) {
+        frameElement.src = frameDataUrl;
+      }
+    });
+
+    return unsubscribe;
+  }, [subscribeRemoteDesktopFrame]);
+
+  useEffect(() => {
+    if (!hasRemoteDesktopFrame || !remoteFrameRef.current) return;
+    if (!latestRemoteFrameDataUrlRef.current) return;
+    remoteFrameRef.current.src = latestRemoteFrameDataUrlRef.current;
+  }, [hasRemoteDesktopFrame]);
+
+  useEffect(() => {
+    if (remoteDesktopSession && hasRemoteDesktopFrame) return;
+
+    latestRemoteFrameDataUrlRef.current = "";
+    if (remoteFrameRef.current) {
+      remoteFrameRef.current.removeAttribute("src");
+    }
+  }, [hasRemoteDesktopFrame, remoteDesktopSession]);
 
   useEffect(() => {
     const isControlActive = remoteInputActive && !!remoteDesktopSession;
@@ -261,7 +283,7 @@ const Room = () => {
     incomingRemoteDesktopRequest ||
     remoteDesktopError ||
     hostAppInstallPrompt ||
-    remoteDesktopFrame
+    hasRemoteDesktopFrame
   );
 
   if (!hasJoined) {
@@ -476,70 +498,41 @@ const Room = () => {
     !selectedRemoteHost.busy &&
     !remoteDesktopPendingRequest &&
     selectedRemoteHostOwnership === "other";
-  const remoteRequestBlockReason = (() => {
-    if (remoteDesktopSession) return "Session already active.";
-    if (remoteDesktopPendingRequest) return "A request is already pending.";
-    if (!effectiveSelectedRemoteHostId || !selectedRemoteHost) {
-      return "Select a host first.";
-    }
-    if (selectedRemoteHost.busy) return "Selected host is busy.";
-    if (selectedRemoteHostOwnership === "you") {
-      return "Host is claimed by you. Other user must request.";
-    }
-    if (selectedRemoteHostOwnership !== "other") {
-      return "Host must be claimed by the other participant.";
-    }
-    return "Ready to request.";
-  })();
-  const diagnosticsItems = [
-    {
-      key: "socket",
-      label: "Socket",
-      value: socketConnected ? "Connected" : "Disconnected",
-      tone: socketConnected ? "ok" : "bad",
-    },
-    {
-      key: "selected-host",
-      label: "Selected Host",
-      value: effectiveSelectedRemoteHostId || "None",
-      tone: effectiveSelectedRemoteHostId ? "ok" : "warn",
-    },
-    {
-      key: "ownership",
-      label: "Ownership",
-      value: getHostOwnershipLabel(selectedRemoteHostOwnership),
-      tone:
-        selectedRemoteHostOwnership === "other"
-          ? "ok"
-          : selectedRemoteHostOwnership === "you"
-          ? "bad"
-          : "warn",
-    },
-    {
-      key: "can-request",
-      label: "Request",
-      value: canRequestSelectedHost ? "Ready" : "Blocked",
-      tone: canRequestSelectedHost ? "ok" : "warn",
-      detail: remoteRequestBlockReason,
-    },
-    {
-      key: "claimed-host",
-      label: "My Claimed Host",
-      value: claimedRemoteHostId || "None",
-      tone: claimedRemoteHostId ? "ok" : "muted",
-    },
-    {
-      key: "hosts-online",
-      label: "Hosts Online",
-      value: String(remoteHosts.length),
-      tone: remoteHosts.length > 0 ? "ok" : "warn",
-    },
-  ];
   const effectiveSetupPeerId = otherParticipants.includes(selectedSetupPeerId)
     ? selectedSetupPeerId
     : otherParticipants.length === 1
     ? otherParticipants[0]
     : "";
+  const hostOwnershipTotals = remoteHosts.reduce(
+    (acc, host) => {
+      const ownership =
+        host?.ownership === "you" || host?.ownership === "other" ? host.ownership : "unclaimed";
+      acc[ownership] += 1;
+      return acc;
+    },
+    { you: 0, other: 0, unclaimed: 0 }
+  );
+  const hostOwnershipSeen = { you: 0, other: 0, unclaimed: 0 };
+  const hostSelectOptions = remoteHosts.map((host) => {
+    const ownership =
+      host?.ownership === "you" || host?.ownership === "other" ? host.ownership : "unclaimed";
+    hostOwnershipSeen[ownership] += 1;
+
+    const baseLabel =
+      ownership === "you" ? "You" : ownership === "other" ? "Other" : "Unclaimed";
+    const duplicateSuffix =
+      hostOwnershipTotals[ownership] > 1 ? ` ${hostOwnershipSeen[ownership]}` : "";
+    const busySuffix = host?.busy ? " (busy)" : "";
+
+    return {
+      value: host.hostId,
+      label: `${baseLabel}${duplicateSuffix}${busySuffix}`,
+    };
+  });
+  const setupParticipantOptions = otherParticipants.map((peerId, index) => ({
+    value: peerId,
+    label: otherParticipants.length === 1 ? "Other" : `Other ${index + 1}`,
+  }));
   const peerIds = Object.keys(peers);
   const peerCount = peerIds.length;
   const modeLabel = isScreenSharing
@@ -725,12 +718,6 @@ const Room = () => {
             {shouldShowRemotePanel ? "Hide Remote Panel" : "Remote Control"}
           </button>
 
-          {!!effectiveZoomTarget && (
-            <button onClick={() => setZoomTarget("")} className="btn btn-default">
-              Unzoom
-            </button>
-          )}
-
           <button
             onClick={async () => {
               const url = window.location.href;
@@ -763,23 +750,6 @@ const Room = () => {
           <div className="remote-card-header">
             <div className="remote-card-top">
               <h4 className="remote-card-title">Full Remote Desktop (Host Agent)</h4>
-              <div className="remote-card-actions">
-                <button
-                  onClick={() => toggleZoom("remote")}
-                  className="btn btn-secondary remote-hide-btn"
-                >
-                  {isZoomed("remote") ? "Unzoom" : "Zoom"}
-                </button>
-                <button
-                  onClick={() => {
-                    setShowRemotePanel(false);
-                    if (isZoomed("remote")) setZoomTarget("");
-                  }}
-                  className="btn btn-default remote-hide-btn"
-                >
-                  Close
-                </button>
-              </div>
             </div>
             <p className="remote-card-subtitle">
               Request remote control from an available host agent.
@@ -797,17 +767,12 @@ const Room = () => {
                       className="remote-host-select"
                     >
                       <option value="">Select Host</option>
-                      {remoteHosts.map((host) => (
-                        <option key={host.hostId} value={host.hostId}>
-                          {host.hostId}
-                          {` [${getHostOwnershipLabel(host.ownership)}]`}
-                          {host.busy ? " (busy)" : ""}
+                      {hostSelectOptions.map((hostOption) => (
+                        <option key={hostOption.value} value={hostOption.value}>
+                          {hostOption.label}
                         </option>
                       ))}
                     </select>
-                    <button onClick={refreshRemoteHosts} className="btn btn-default remote-refresh-btn">
-                      Refresh Hosts
-                    </button>
                     <button
                       onClick={() => claimRemoteHost(effectiveSelectedRemoteHostId)}
                       disabled={!canClaimSelectedHost}
@@ -815,7 +780,7 @@ const Room = () => {
                     >
                       {selectedRemoteHostOwnership === "other"
                         ? "Claimed by Other"
-                        : claimedRemoteHostId === effectiveSelectedRemoteHostId
+                        : selectedRemoteHostOwnership === "you"
                         ? "Host Claimed"
                         : "Claim As My Host"}
                     </button>
@@ -846,22 +811,6 @@ const Room = () => {
                       means claimed by the other participant, <strong>Unclaimed</strong> means
                       someone still needs to claim the host before requesting control.
                     </div>
-                    <div className="remote-diagnostics">
-                      <div className="remote-diagnostics-title">Remote Diagnostics</div>
-                      <div className="remote-diagnostics-grid">
-                        {diagnosticsItems.map((item) => (
-                          <div key={item.key} className="remote-diag-item">
-                            <div className="remote-diag-label">{item.label}</div>
-                            <div className={`remote-diag-value remote-diag-value--${item.tone}`}>
-                              {item.value}
-                            </div>
-                            {!!item.detail && (
-                              <div className="remote-diag-detail">{item.detail}</div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
                   </div>
                 ) : (
                   <div className="remote-setup-row">
@@ -874,17 +823,14 @@ const Room = () => {
                       <option value="">
                         {otherParticipants.length === 0
                           ? "No participant available"
-                          : "Select Participant"}
+                          : "Select Other"}
                       </option>
-                      {otherParticipants.map((peerId) => (
-                        <option key={peerId} value={peerId}>
-                          {peerId}
+                      {setupParticipantOptions.map((participantOption) => (
+                        <option key={participantOption.value} value={participantOption.value}>
+                          {participantOption.label}
                         </option>
                       ))}
                     </select>
-                    <button onClick={refreshRemoteHosts} className="btn btn-default remote-refresh-btn">
-                      Refresh Hosts
-                    </button>
                     <button
                       onClick={() => requestRemoteHostSetup(effectiveSetupPeerId)}
                       disabled={!effectiveSetupPeerId || !!remoteHostSetupPending}
@@ -917,19 +863,9 @@ const Room = () => {
                   {hostAppInstallPrompt.message}
                 </div>
                 <div className="host-app-prompt-text">
-                  Ask the other user to install and run the host app, then retry.
+                  Ask the other user to install and run the host app, then continue.
                 </div>
                 <div className="host-app-prompt-actions">
-                  {!!hostAppInstallPrompt.launchUrl && (
-                    <button
-                      onClick={() =>
-                        window.open(hostAppInstallPrompt.launchUrl, "_blank", "noopener,noreferrer")
-                      }
-                      className="btn btn-secondary"
-                    >
-                      Launch Host App
-                    </button>
-                  )}
                   {!!hostAppInstallPrompt.downloadUrl && (
                     <button
                       onClick={() =>
@@ -937,34 +873,14 @@ const Room = () => {
                       }
                       className="btn btn-primary"
                     >
-                      {hostAppInstallPrompt.downloadLabel || "Download Host App"}
-                    </button>
-                  )}
-                  {!!hostAppInstallPrompt.alternateDownloadUrl && (
-                    <button
-                      onClick={() =>
-                        window.open(
-                          hostAppInstallPrompt.alternateDownloadUrl,
-                          "_blank",
-                          "noopener,noreferrer"
-                        )
-                      }
-                      className="btn btn-default"
-                    >
-                      {hostAppInstallPrompt.alternateDownloadLabel || "Download Alternate Host App"}
+                      Download Host App
                     </button>
                   )}
                   <button
-                    onClick={() => {
-                      dismissHostAppInstallPrompt();
-                      if (canRequestSelectedHost) {
-                        requestRemoteDesktopSession(effectiveSelectedRemoteHostId);
-                      }
-                    }}
-                    disabled={!canRequestSelectedHost}
+                    onClick={dismissHostAppInstallPrompt}
                     className="btn btn-default"
                   >
-                    Retry Request
+                    Close
                   </button>
                 </div>
               </div>
@@ -1040,10 +956,9 @@ const Room = () => {
               onContextMenu={(event) => event.preventDefault()}
               className={`remote-surface ${isControlActive ? "remote-surface--active" : ""}`}
             >
-              {remoteDesktopFrame ? (
+              {hasRemoteDesktopFrame ? (
                 <img
                   ref={remoteFrameRef}
-                  src={remoteDesktopFrame}
                   alt="Remote desktop"
                   className={`remote-surface-frame ${
                     isControlActive ? "remote-surface-frame--active" : ""

@@ -16,43 +16,11 @@ const REMOTE_CONTROL_TOKEN = import.meta.env.VITE_REMOTE_CONTROL_TOKEN || "";
 const HOST_APP_DOWNLOAD_URL =
   import.meta.env.VITE_HOST_APP_DOWNLOAD_URL ||
   "https://github.com/prima-mayank/remote-agent/releases/latest/download/host-app-win.zip";
-const HOST_APP_DOWNLOAD_URL_LOCAL = String(
-  import.meta.env.VITE_HOST_APP_DOWNLOAD_URL_LOCAL || ""
-).trim();
-const HOST_APP_PROTOCOL_URL = String(import.meta.env.VITE_HOST_APP_PROTOCOL_URL || "").trim();
 const HOST_APP_REQUIRED_ERROR_CODES = new Set([
   "host-not-found",
   "host-offline",
 ]);
 const REMOTE_DEBUG_ENABLED = String(import.meta.env.VITE_REMOTE_DEBUG || "").trim() === "1";
-
-const buildHostAppLaunchUrl = (hostId = "") => {
-  if (!HOST_APP_PROTOCOL_URL) return "";
-
-  try {
-    const launchUrl = new URL(HOST_APP_PROTOCOL_URL);
-    launchUrl.searchParams.set("server", WS_SERVER);
-    if (hostId) {
-      launchUrl.searchParams.set("hostId", hostId);
-    }
-    if (REMOTE_CONTROL_TOKEN) {
-      launchUrl.searchParams.set("token", REMOTE_CONTROL_TOKEN);
-    }
-    return launchUrl.toString();
-  } catch {
-    return "";
-  }
-};
-
-const isLocalSocketServer = (url) => {
-  try {
-    const parsed = new URL(url);
-    const host = String(parsed.hostname || "").toLowerCase();
-    return host === "localhost" || host === "127.0.0.1";
-  } catch {
-    return false;
-  }
-};
 
 const normalizeHttpDownloadUrl = (url) => {
   const raw = String(url || "").trim();
@@ -68,7 +36,10 @@ const normalizeHttpDownloadUrl = (url) => {
   }
 };
 
-const buildLocalDownloadUrlFromSocketServer = () => {
+const buildHostAppDownloadUrl = () => {
+  const configuredUrl = normalizeHttpDownloadUrl(HOST_APP_DOWNLOAD_URL);
+  if (configuredUrl) return configuredUrl;
+
   try {
     const base = typeof window !== "undefined" ? window.location.origin : "http://localhost";
     const parsed = new URL(WS_SERVER, base);
@@ -79,29 +50,6 @@ const buildLocalDownloadUrlFromSocketServer = () => {
   } catch {
     return "";
   }
-};
-
-const buildHostDownloadTargets = () => {
-  const cloudUrl = normalizeHttpDownloadUrl(HOST_APP_DOWNLOAD_URL);
-  const configuredLocalUrl = normalizeHttpDownloadUrl(HOST_APP_DOWNLOAD_URL_LOCAL);
-  const localUrl = configuredLocalUrl || buildLocalDownloadUrlFromSocketServer();
-  const preferLocal = isLocalSocketServer(WS_SERVER) && !!localUrl;
-
-  const primaryUrl = preferLocal ? localUrl : cloudUrl || localUrl;
-  const secondaryUrl =
-    primaryUrl === localUrl
-      ? cloudUrl
-      : primaryUrl === cloudUrl
-      ? localUrl
-      : "";
-
-  return {
-    primaryUrl,
-    secondaryUrl,
-    primaryLabel: primaryUrl === localUrl ? "Download Host App (Local)" : "Download Host App (Cloud)",
-    secondaryLabel:
-      secondaryUrl === localUrl ? "Download Host App (Local)" : "Download Host App (Cloud)",
-  };
 };
 
 const shouldInitiateCall = (localPeerId, remotePeerId) => {
@@ -183,6 +131,8 @@ export const SocketProvider = ({ children }) => {
   const remoteDesktopPendingRequestRef = useRef(null);
   const remoteHostsRef = useRef([]);
   const remoteInputDebugRef = useRef({ count: 0, lastLoggedAt: 0 });
+  const remoteFrameSubscribersRef = useRef(new Set());
+  const hasRemoteDesktopFrameRef = useRef(false);
   const screenShareTrackRef = useRef(null);
   const cameraTrackBeforeShareRef = useRef(null);
 
@@ -201,7 +151,7 @@ export const SocketProvider = ({ children }) => {
   const [remoteHostSetupStatus, setRemoteHostSetupStatus] = useState("");
   const [autoClaimRemoteHostId, setAutoClaimRemoteHostId] = useState("");
   const [autoRequestRemoteHostId, setAutoRequestRemoteHostId] = useState("");
-  const [remoteDesktopFrame, setRemoteDesktopFrame] = useState(null);
+  const [hasRemoteDesktopFrame, setHasRemoteDesktopFrame] = useState(false);
   const [remoteDesktopError, setRemoteDesktopError] = useState("");
   const [hostAppInstallPrompt, setHostAppInstallPrompt] = useState(null);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
@@ -243,6 +193,18 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     remoteHostsRef.current = remoteHosts;
   }, [remoteHosts]);
+
+  const subscribeRemoteDesktopFrame = useCallback((listener) => {
+    if (typeof listener !== "function") {
+      return () => {};
+    }
+
+    const listeners = remoteFrameSubscribersRef.current;
+    listeners.add(listener);
+    return () => {
+      listeners.delete(listener);
+    };
+  }, []);
 
   const refreshRemoteHosts = useCallback(() => {
     logRemote("request-hosts-list");
@@ -448,8 +410,7 @@ export const SocketProvider = ({ children }) => {
     if (!incomingRemoteHostSetupRequest?.requestId) return;
 
     const suggestedHostId = String(incomingRemoteHostSetupRequest.suggestedHostId || "").trim();
-    const launchUrl = buildHostAppLaunchUrl(suggestedHostId);
-    const downloadTargets = buildHostDownloadTargets();
+    const downloadUrl = buildHostAppDownloadUrl();
 
     socket.emit("remote-host-setup-decision", {
       requestId: incomingRemoteHostSetupRequest.requestId,
@@ -457,36 +418,24 @@ export const SocketProvider = ({ children }) => {
     });
 
     if (accepted) {
-      if (launchUrl) {
-        window.open(launchUrl, "_blank", "noopener,noreferrer");
-      }
-      if (downloadTargets.primaryUrl) {
-        const launchFirstDelayMs = launchUrl ? 2200 : 0;
+      if (downloadUrl) {
         window.setTimeout(() => {
           const hostAlreadyOnline =
             !!suggestedHostId &&
-            remoteHostsRef.current.some(
-              (host) => host.hostId === suggestedHostId
-            );
+            remoteHostsRef.current.some((host) => host.hostId === suggestedHostId);
           if (hostAlreadyOnline) return;
-          window.open(downloadTargets.primaryUrl, "_blank", "noopener,noreferrer");
-        }, launchFirstDelayMs);
+          window.open(downloadUrl, "_blank", "noopener,noreferrer");
+        }, 250);
       }
       setAutoClaimRemoteHostId(suggestedHostId);
       setHostAppInstallPrompt({
         message: suggestedHostId
           ? `Setup accepted. Start the host app on this device with host ID '${suggestedHostId}'.`
           : "Setup accepted. Start the host app on this device.",
-        downloadUrl: downloadTargets.primaryUrl,
-        downloadLabel: downloadTargets.primaryLabel,
-        alternateDownloadUrl: downloadTargets.secondaryUrl,
-        alternateDownloadLabel: downloadTargets.secondaryLabel,
-        launchUrl,
+        downloadUrl,
       });
       setRemoteHostSetupStatus(
-        launchUrl
-          ? "Host setup accepted. Launch requested; download opens automatically if app is not installed/running."
-          : "Host setup accepted. Download opened. Start the host app and keep it running."
+        "Host setup accepted. Download opened. Start the host app and keep it running."
       );
     }
 
@@ -697,9 +646,10 @@ export const SocketProvider = ({ children }) => {
       if (!sessionId) return;
       remoteSessionIdRef.current = sessionId;
       remoteDesktopPendingRequestRef.current = null;
+      hasRemoteDesktopFrameRef.current = false;
       setRemoteDesktopSession({ sessionId, hostId });
       setRemoteDesktopPendingRequest(null);
-      setRemoteDesktopFrame(null);
+      setHasRemoteDesktopFrame(false);
       setRemoteDesktopError("");
       setHostAppInstallPrompt(null);
       setRemoteHostSetupPending(null);
@@ -783,14 +733,29 @@ export const SocketProvider = ({ children }) => {
       setRemoteDesktopPendingRequest(null);
       setIncomingRemoteDesktopRequest(null);
       setIncomingRemoteHostSetupRequest(null);
-      setRemoteDesktopFrame(null);
+      hasRemoteDesktopFrameRef.current = false;
+      setHasRemoteDesktopFrame(false);
       setHostAppInstallPrompt(null);
     };
 
     const onRemoteFrame = ({ sessionId, image }) => {
       if (!sessionId || typeof image !== "string") return;
       if (remoteSessionIdRef.current !== sessionId) return;
-      setRemoteDesktopFrame(`data:image/jpeg;base64,${image}`);
+
+      const frameDataUrl = `data:image/jpeg;base64,${image}`;
+      const listeners = remoteFrameSubscribersRef.current;
+      listeners.forEach((listener) => {
+        try {
+          listener(frameDataUrl);
+        } catch {
+          // noop
+        }
+      });
+
+      if (!hasRemoteDesktopFrameRef.current) {
+        hasRemoteDesktopFrameRef.current = true;
+        setHasRemoteDesktopFrame(true);
+      }
     };
 
     const onRemoteSessionError = ({ message, code }) => {
@@ -806,13 +771,10 @@ export const SocketProvider = ({ children }) => {
       setRemoteHostSetupPending(null);
 
       if (HOST_APP_REQUIRED_ERROR_CODES.has(String(code || "").trim())) {
-        const downloadTargets = buildHostDownloadTargets();
+        const downloadUrl = buildHostAppDownloadUrl();
         setHostAppInstallPrompt({
           message: normalizedMessage,
-          downloadUrl: downloadTargets.primaryUrl,
-          downloadLabel: downloadTargets.primaryLabel,
-          alternateDownloadUrl: downloadTargets.secondaryUrl,
-          alternateDownloadLabel: downloadTargets.secondaryLabel,
+          downloadUrl,
         });
         return;
       }
@@ -832,7 +794,8 @@ export const SocketProvider = ({ children }) => {
       setIncomingRemoteHostSetupRequest(null);
       setRemoteHostSetupPending(null);
       setRemoteHostSetupStatus("");
-      setRemoteDesktopFrame(null);
+      hasRemoteDesktopFrameRef.current = false;
+      setHasRemoteDesktopFrame(false);
       setHostAppInstallPrompt(null);
       setRemoteHosts([]);
       setRoomParticipants([]);
@@ -985,7 +948,8 @@ export const SocketProvider = ({ children }) => {
     setRemoteHostSetupPending(null);
     setRemoteHostSetupStatus("");
     remoteSessionIdRef.current = null;
-    setRemoteDesktopFrame(null);
+    hasRemoteDesktopFrameRef.current = false;
+    setHasRemoteDesktopFrame(false);
     setRemoteDesktopError("");
     setIsScreenSharing(false);
     setRoomParticipants([]);
@@ -1034,7 +998,7 @@ export const SocketProvider = ({ children }) => {
         incomingRemoteHostSetupRequest,
         remoteHostSetupPending,
         remoteHostSetupStatus,
-        remoteDesktopFrame,
+        hasRemoteDesktopFrame,
         remoteDesktopError,
         hostAppInstallPrompt,
         socketConnected,
@@ -1052,6 +1016,7 @@ export const SocketProvider = ({ children }) => {
         dismissHostAppInstallPrompt,
         respondToRemoteDesktopRequest,
         respondToRemoteHostSetupRequest,
+        subscribeRemoteDesktopFrame,
         sendRemoteDesktopInput,
         endCall,
       }}

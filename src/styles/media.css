@@ -13,7 +13,7 @@
   aspect-ratio: 16 / 10;
   object-fit: cover;
   border-radius: 9px;
-  border: 1px solid rgba(152, 182, 255, 0.2);
+  border: 1px solid var(--border-0);
   background: #000;
   opacity: 1;
 }
@@ -28,11 +28,11 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  color: #e8f1ff;
+  color: var(--text-0);
   font-weight: 700;
   letter-spacing: 0.2px;
   border-radius: 9px;
   background:
-    radial-gradient(circle at 30% 15%, rgba(52, 95, 168, 0.32), transparent 54%),
-    rgba(4, 10, 20, 0.22);
+    radial-gradient(circle at 30% 15%, rgba(83, 188, 255, 0.28), transparent 54%),
+    rgba(6, 13, 24, 0.26);
 }
