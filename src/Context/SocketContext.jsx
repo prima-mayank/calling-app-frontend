@@ -7,6 +7,7 @@ import { v4 as UUIDv4 } from "uuid";
 import { peerReducer } from "../Reducers/peerReducer";
 import { addPeerAction, removePeerAction } from "../Actions/peerAction";
 import { SocketContext } from "./socketContextValue";
+import { startAdaptiveVideo } from "../utils/peerAdaptiveVideo";
 
 const WS_SERVER =
   import.meta.env.VITE_SOCKET_URL ||
@@ -135,6 +136,7 @@ export const SocketProvider = ({ children }) => {
   const hasRemoteDesktopFrameRef = useRef(false);
   const screenShareTrackRef = useRef(null);
   const cameraTrackBeforeShareRef = useRef(null);
+  const adaptiveVideoControllerRef = useRef(null);
 
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [videoEnabled, setVideoEnabled] = useState(true);
@@ -206,6 +208,23 @@ export const SocketProvider = ({ children }) => {
     };
   }, []);
 
+  const getPeerConnections = useCallback(() => {
+    return Object.values(callsRef.current)
+      .map((call) => call?.peerConnection || call?._pc || null)
+      .filter((pc) => !!pc && typeof pc.getStats === "function");
+  }, []);
+
+  const stopAdaptiveVideo = useCallback(() => {
+    const controller = adaptiveVideoControllerRef.current;
+    if (!controller) return;
+    try {
+      controller.stop();
+    } catch {
+      // noop
+    }
+    adaptiveVideoControllerRef.current = null;
+  }, []);
+
   const refreshRemoteHosts = useCallback(() => {
     logRemote("request-hosts-list");
     socket.emit("remote-hosts-request");
@@ -273,6 +292,32 @@ export const SocketProvider = ({ children }) => {
       return null;
     }
   };
+
+  useEffect(() => {
+    stopAdaptiveVideo();
+
+    if (!stream || isScreenSharing) return;
+    if (stream.getVideoTracks().length === 0) return;
+
+    adaptiveVideoControllerRef.current = startAdaptiveVideo(stream, {
+      checkIntervalMs: 3500,
+      getPeerConnections,
+      lowConstraints: {
+        width: { ideal: 426, max: 640 },
+        height: { ideal: 240, max: 360 },
+        frameRate: { ideal: 12, max: 15 },
+      },
+      veryLowConstraints: {
+        width: { ideal: 320, max: 426 },
+        height: { ideal: 180, max: 240 },
+        frameRate: { ideal: 8, max: 10 },
+      },
+    });
+
+    return () => {
+      stopAdaptiveVideo();
+    };
+  }, [getPeerConnections, isScreenSharing, stopAdaptiveVideo, stream]);
 
   const setupCallHandlers = useCallback((call, peerId) => {
     if (!call || !peerId) return;
@@ -920,6 +965,8 @@ export const SocketProvider = ({ children }) => {
   };
 
   const endCall = (roomId) => {
+    stopAdaptiveVideo();
+
     if (remoteDesktopSession?.sessionId) {
       socket.emit("remote-session-stop", { sessionId: remoteDesktopSession.sessionId });
     }
@@ -1020,6 +1067,7 @@ export const SocketProvider = ({ children }) => {
         respondToRemoteHostSetupRequest,
         subscribeRemoteDesktopFrame,
         sendRemoteDesktopInput,
+        getPeerConnections,
         endCall,
       }}
     >

@@ -3,6 +3,7 @@ import { useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { SocketContext } from "../Context/socketContextValue";
 import UserFeedPlayer from "../components/UserFeedPlayer";
+import LowNetworkWarning from "../components/LowNetworkWarning";
 
 const mapMouseButton = (button) => {
   if (button === 2) return "right";
@@ -76,6 +77,7 @@ const Room = () => {
     respondToRemoteHostSetupRequest,
     subscribeRemoteDesktopFrame,
     sendRemoteDesktopInput,
+    getPeerConnections,
     endCall,
   } = useContext(SocketContext);
 
@@ -293,6 +295,7 @@ const Room = () => {
   if (!hasJoined) {
     return (
       <div className="room-join-page">
+        <LowNetworkWarning getPeerConnections={getPeerConnections} />
         <div className="room-join-shell panel">
           <h2>Join Room: {id}</h2>
           <p className="room-join-subtitle">Choose how you want to join this room.</p>
@@ -683,6 +686,7 @@ const Room = () => {
 
   return (
     <div className="room-page">
+      <LowNetworkWarning getPeerConnections={getPeerConnections} />
       <div className="room-header panel">
         <div className="room-header-main">
           <h3 className="room-title">Room: {id}</h3>
