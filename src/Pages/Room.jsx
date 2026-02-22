@@ -306,12 +306,6 @@ const Room = () => {
             <button onClick={() => joinRoomWithMode("audio")} className="btn btn-call-audio btn-join">
               Join Audio Only
             </button>
-            <button
-              onClick={() => joinRoomWithMode("none")}
-              className="btn btn-default btn-join btn-join--wide"
-            >
-              Join Without Media (Remote Only)
-            </button>
           </div>
         </div>
       </div>
