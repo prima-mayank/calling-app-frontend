@@ -30,26 +30,8 @@ const Home = () => {
       } catch {
         // noop
       }
-      alert("Camera/mic unavailable or blocked. Allow permissions, or use Start Remote Only.");
+      alert("Camera/mic unavailable or blocked. Allow permissions and retry.");
       return;
-    }
-
-    socket.emit("create-room");
-  };
-
-  const startRemoteOnly = () => {
-    if (!socketConnected) {
-      alert("Backend is not connected yet. Check VITE_SOCKET_URL and retry.");
-      return;
-    }
-
-    try {
-      sessionStorage.setItem(
-        HOME_JOIN_PREF_KEY,
-        JSON.stringify({ mode: "none", ts: Date.now() })
-      );
-    } catch {
-      // noop
     }
 
     socket.emit("create-room");
@@ -60,7 +42,7 @@ const Home = () => {
       <div className="home-shell panel">
         <h1 className="home-title">Calling Workspace</h1>
         <p className="home-subtitle">
-          Start a video or audio room, or open a remote-only room for desktop control workflows.
+          Start a video or audio room.
         </p>
         <div className={`connection-pill ${socketConnected ? "connection-pill--online" : ""}`}>
           {socketConnected ? "Backend connected" : "Backend disconnected"}
@@ -79,13 +61,6 @@ const Home = () => {
             className="btn btn-call-audio home-action-btn"
           >
             Start Audio Call
-          </button>
-
-          <button
-            onClick={startRemoteOnly}
-            className="btn btn-default home-action-btn"
-          >
-            Start Remote Only
           </button>
         </div>
       </div>
