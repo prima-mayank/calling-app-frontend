@@ -212,23 +212,19 @@ export const SocketProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    const onConnect = () => setSocketConnected(true);
-    const onDisconnect = () => setSocketConnected(false);
-    const onConnectError = () => {
-      setSocketConnected(false);
-    };
-
-    const onConnected = () => {
-      onConnect();
+    const onConnect = () => {
+      setSocketConnected(true);
       refreshRemoteHosts();
     };
+    const onDisconnect = () => setSocketConnected(false);
+    const onConnectError = () => setSocketConnected(false);
 
-    socket.on("connect", onConnected);
+    socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("connect_error", onConnectError);
 
     return () => {
-      socket.off("connect", onConnected);
+      socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
     };
@@ -867,6 +863,11 @@ export const SocketProvider = ({ children }) => {
 
     socket.on("user-joined", onUserJoined);
 
+    const emitReady = () => {
+      socket.emit("ready");
+    };
+    socket.on("connect", emitReady);
+
     if (pendingParticipantsRef.current.length > 0) {
       pendingParticipantsRef.current.forEach((pid) => {
         if (pid === user.id) return;
@@ -879,7 +880,7 @@ export const SocketProvider = ({ children }) => {
       pendingParticipantsRef.current = [];
     }
 
-    socket.emit("ready");
+    emitReady();
 
     return () => {
       try {
@@ -887,6 +888,7 @@ export const SocketProvider = ({ children }) => {
       } catch {
         // noop
       }
+      socket.off("connect", emitReady);
       socket.off("user-joined", onUserJoined);
     };
   }, [setupCallHandlers, stream, user]);

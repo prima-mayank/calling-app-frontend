@@ -1,4 +1,5 @@
 ﻿import { useContext, useEffect, useRef, useState } from "react";
+import { useCallback } from "react";
 import { useParams } from "react-router-dom";
 import { SocketContext } from "../Context/socketContextValue";
 import UserFeedPlayer from "../components/UserFeedPlayer";
@@ -97,9 +98,8 @@ const Room = () => {
     startY: 0,
   });
   const ignoreNextClickRef = useRef(false);
-  const joinedRoomIdRef = useRef("");
 
-  const handleJoinRoom = async (mode) => {
+  const joinRoomWithMode = useCallback(async (mode) => {
     if (mode === "none") {
       setHasJoined(true);
       return;
@@ -108,7 +108,7 @@ const Room = () => {
     const media = await provideStream(mode === "video");
     if (!media) return;
     setHasJoined(true);
-  };
+  }, [provideStream]);
 
   useEffect(() => {
     if (hasJoined) return;
@@ -138,31 +138,35 @@ const Room = () => {
     if (mode !== "video" && mode !== "audio" && mode !== "none") return;
 
     const autoJoin = async () => {
-      if (mode === "none") {
-        setHasJoined(true);
-        return;
-      }
-
-      const media = await provideStream(mode === "video");
-      if (!media) return;
-      setHasJoined(true);
+      await joinRoomWithMode(mode);
     };
 
     void autoJoin();
-  }, [hasJoined, provideStream]);
+  }, [hasJoined, joinRoomWithMode]);
 
   useEffect(() => {
     // Join the Socket.IO room as early as possible so the room exists/has identity
     // even before the user chooses audio/video/none. WebRTC calls will wait for stream.
-    if (!user || !id) return;
-    if (joinedRoomIdRef.current === id) return;
+    const peerId = user?.id;
+    if (!peerId || !id) return;
 
-    joinedRoomIdRef.current = id;
-    socket.emit("joined-room", {
-      roomId: id,
-      peerId: user.id,
-    });
-  }, [id, user, socket]);
+    const emitJoinRoom = () => {
+      socket.emit("joined-room", {
+        roomId: id,
+        peerId,
+      });
+    };
+
+    if (socket.connected) {
+      emitJoinRoom();
+    }
+
+    socket.on("connect", emitJoinRoom);
+
+    return () => {
+      socket.off("connect", emitJoinRoom);
+    };
+  }, [id, socket, user?.id]);
 
   useEffect(() => {
     const unsubscribe = subscribeRemoteDesktopFrame((frameDataUrl) => {
@@ -293,14 +297,14 @@ const Room = () => {
           <h2>Join Room: {id}</h2>
           <p className="room-join-subtitle">Choose how you want to join this room.</p>
           <div className="room-join-actions">
-            <button onClick={() => handleJoinRoom("video")} className="btn btn-call-video btn-join">
+            <button onClick={() => joinRoomWithMode("video")} className="btn btn-call-video btn-join">
               Join with Video
             </button>
-            <button onClick={() => handleJoinRoom("audio")} className="btn btn-call-audio btn-join">
+            <button onClick={() => joinRoomWithMode("audio")} className="btn btn-call-audio btn-join">
               Join Audio Only
             </button>
             <button
-              onClick={() => handleJoinRoom("none")}
+              onClick={() => joinRoomWithMode("none")}
               className="btn btn-default btn-join btn-join--wide"
             >
               Join Without Media (Remote Only)
@@ -479,9 +483,13 @@ const Room = () => {
   const isControlActive = remoteInputActive && !!remoteDesktopSession;
   const shouldShowRemotePanel = showRemotePanel || hasRemoteActivity;
   const hasVideoTrack = !!stream && stream.getVideoTracks().length > 0;
-  const otherParticipants = roomParticipants.filter(
-    (participantId) => participantId && participantId !== user?.id
-  );
+  const otherParticipants = [
+    ...new Set(
+      roomParticipants
+        .map((participantId) => String(participantId || "").trim())
+        .filter((participantId) => participantId && participantId !== user?.id)
+    ),
+  ];
   const hasExplicitHostSelection = remoteHosts.some(
     (host) => host.hostId === selectedRemoteHostId
   );
@@ -534,7 +542,14 @@ const Room = () => {
     label: otherParticipants.length === 1 ? "Other" : `Other ${index + 1}`,
   }));
   const peerIds = Object.keys(peers);
-  const peerCount = peerIds.length;
+  const participantsWithoutMedia = otherParticipants.filter(
+    (participantId) => !peers[participantId]
+  );
+  const localParticipantBase = user?.id ? 1 : 0;
+  const participantCount = Math.max(
+    localParticipantBase + peerIds.length,
+    localParticipantBase + otherParticipants.length
+  );
   const modeLabel = isScreenSharing
     ? "Screen Sharing"
     : !stream
@@ -674,7 +689,9 @@ const Room = () => {
           <p className="room-meta">
             <span className="room-badge">{modeLabel}</span>
             <span className="room-meta-sep">•</span>
-            <span>{peerCount + 1} participant{peerCount + 1 === 1 ? "" : "s"}</span>
+            <span>
+              {participantCount} participant{participantCount === 1 ? "" : "s"}
+            </span>
           </p>
         </div>
       </div>
@@ -1030,7 +1047,9 @@ const Room = () => {
           <div className="feed-section">
             <h4 className="feed-title">Participants</h4>
             <div className="participants-grid">
-              {peerIds.length === 0 && <div className="muted-text">No other participants</div>}
+              {peerIds.length === 0 && participantsWithoutMedia.length === 0 && (
+                <div className="muted-text">No other participants</div>
+              )}
 
               {peerIds.map((peerId) => (
                 <div key={peerId} className="participant-card">
@@ -1041,6 +1060,15 @@ const Room = () => {
                     </button>
                   </div>
                   <UserFeedPlayer stream={peers[peerId].stream} muted={false} />
+                </div>
+              ))}
+
+              {participantsWithoutMedia.map((participantId) => (
+                <div key={`nomedia:${participantId}`} className="participant-card">
+                  <div className="participant-card-header">
+                    <div className="participant-name">{participantId}</div>
+                  </div>
+                  <div className="muted-text">Joined without media</div>
                 </div>
               ))}
             </div>
