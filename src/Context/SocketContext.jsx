@@ -15,8 +15,9 @@ import {
 } from "../utils/peerStableIdentity";
 
 const resolveDefaultSocketServer = () => {
-  if (import.meta.env.VITE_SOCKET_URL) {
-    return import.meta.env.VITE_SOCKET_URL;
+  const configuredSocketUrl = String(import.meta.env.VITE_SOCKET_URL || "").trim();
+  if (configuredSocketUrl) {
+    return configuredSocketUrl;
   }
 
   if (import.meta.env.DEV) {
@@ -35,10 +36,11 @@ const resolveDefaultSocketServer = () => {
 };
 
 const WS_SERVER = resolveDefaultSocketServer();
-const REMOTE_CONTROL_TOKEN = import.meta.env.VITE_REMOTE_CONTROL_TOKEN || "";
-const HOST_APP_DOWNLOAD_URL =
+const REMOTE_CONTROL_TOKEN = String(import.meta.env.VITE_REMOTE_CONTROL_TOKEN || "").trim();
+const HOST_APP_DOWNLOAD_URL = String(
   import.meta.env.VITE_HOST_APP_DOWNLOAD_URL ||
-  "https://github.com/prima-mayank/remote-agent/releases/latest/download/host-app-win.zip";
+    "https://github.com/prima-mayank/remote-agent/releases/latest/download/host-app-win.zip"
+).trim();
 const HOST_APP_REQUIRED_ERROR_CODES = new Set([
   "host-not-found",
   "host-offline",
@@ -145,9 +147,12 @@ const buildPeerConnectionConfig = () => {
     }
   }
 
-  const envHost = import.meta.env.VITE_PEER_HOST;
+  const envHost = String(import.meta.env.VITE_PEER_HOST || "").trim();
   const envPort = parsePort(import.meta.env.VITE_PEER_PORT);
-  const envSecure = import.meta.env.VITE_PEER_SECURE;
+  const envSecureRaw = String(import.meta.env.VITE_PEER_SECURE || "")
+    .trim()
+    .toLowerCase();
+  const envPath = String(import.meta.env.VITE_PEER_PATH || "/peerjs/myapp").trim();
 
   return {
     host:
@@ -155,8 +160,13 @@ const buildPeerConnectionConfig = () => {
       socketHost ||
       (isProduction && isBrowser ? window.location.hostname : "localhost"),
     port: envPort || socketPort || (isProduction ? 443 : 5000),
-    path: import.meta.env.VITE_PEER_PATH || "/peerjs/myapp",
-    secure: envSecure ? envSecure === "true" : socketSecure,
+    path: envPath || "/peerjs/myapp",
+    secure:
+      envSecureRaw === "true" || envSecureRaw === "1"
+        ? true
+        : envSecureRaw === "false" || envSecureRaw === "0"
+        ? false
+        : socketSecure,
   };
 };
 
