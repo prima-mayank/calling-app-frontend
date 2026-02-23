@@ -14,8 +14,21 @@ import {
   saveStablePeerId,
 } from "../utils/peerStableIdentity";
 
+const normalizeSocketServerUrl = (value) => {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+
+  try {
+    const parsed = new URL(raw);
+    parsed.hash = "";
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return raw.replace(/\/+$/, "");
+  }
+};
+
 const resolveDefaultSocketServer = () => {
-  const configuredSocketUrl = String(import.meta.env.VITE_SOCKET_URL || "").trim();
+  const configuredSocketUrl = normalizeSocketServerUrl(import.meta.env.VITE_SOCKET_URL);
   if (configuredSocketUrl) {
     return configuredSocketUrl;
   }
@@ -26,13 +39,13 @@ const resolveDefaultSocketServer = () => {
         typeof window !== "undefined" && window.location?.hostname
           ? window.location.hostname
           : "localhost";
-      return `http://${host}:5000`;
+      return normalizeSocketServerUrl(`http://${host}:5000`);
     } catch {
-      return "http://localhost:5000";
+      return normalizeSocketServerUrl("http://localhost:5000");
     }
   }
 
-  return "https://calling-app-backend-1.onrender.com";
+  return normalizeSocketServerUrl("https://calling-app-backend-1.onrender.com");
 };
 
 const WS_SERVER = resolveDefaultSocketServer();
