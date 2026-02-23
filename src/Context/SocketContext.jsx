@@ -8,11 +8,33 @@ import { peerReducer } from "../Reducers/peerReducer";
 import { addPeerAction, removePeerAction } from "../Actions/peerAction";
 import { SocketContext } from "./socketContextValue";
 import { startAdaptiveVideo } from "../utils/peerAdaptiveVideo";
+import {
+  getOrCreateStablePeerId,
+  rotateStablePeerId,
+  saveStablePeerId,
+} from "../utils/peerStableIdentity";
 
-const WS_SERVER =
-  import.meta.env.VITE_SOCKET_URL ||
-  (import.meta.env.DEV && "http://localhost:5000") ||
-  "https://calling-app-backend-1.onrender.com";
+const resolveDefaultSocketServer = () => {
+  if (import.meta.env.VITE_SOCKET_URL) {
+    return import.meta.env.VITE_SOCKET_URL;
+  }
+
+  if (import.meta.env.DEV) {
+    try {
+      const host =
+        typeof window !== "undefined" && window.location?.hostname
+          ? window.location.hostname
+          : "localhost";
+      return `http://${host}:5000`;
+    } catch {
+      return "http://localhost:5000";
+    }
+  }
+
+  return "https://calling-app-backend-1.onrender.com";
+};
+
+const WS_SERVER = resolveDefaultSocketServer();
 const REMOTE_CONTROL_TOKEN = import.meta.env.VITE_REMOTE_CONTROL_TOKEN || "";
 const HOST_APP_DOWNLOAD_URL =
   import.meta.env.VITE_HOST_APP_DOWNLOAD_URL ||
@@ -22,6 +44,18 @@ const HOST_APP_REQUIRED_ERROR_CODES = new Set([
   "host-offline",
 ]);
 const REMOTE_DEBUG_ENABLED = String(import.meta.env.VITE_REMOTE_DEBUG || "").trim() === "1";
+const SOCKET_RECONNECT_DELAY_MS = 1000;
+const SOCKET_RECONNECT_DELAY_MAX_MS = 8000;
+const SOCKET_RECONNECT_ATTEMPTS = Infinity;
+const SOCKET_WS_UPGRADE_ENV = String(import.meta.env.VITE_SOCKET_WS_UPGRADE || "")
+  .trim()
+  .toLowerCase();
+const SOCKET_ENABLE_WS_UPGRADE =
+  SOCKET_WS_UPGRADE_ENV === "1" ||
+  SOCKET_WS_UPGRADE_ENV === "true" ||
+  (SOCKET_WS_UPGRADE_ENV !== "0" &&
+    SOCKET_WS_UPGRADE_ENV !== "false" &&
+    !import.meta.env.DEV);
 
 const normalizeHttpDownloadUrl = (url) => {
   const raw = String(url || "").trim();
@@ -56,6 +90,22 @@ const buildHostAppDownloadUrl = () => {
 const shouldInitiateCall = (localPeerId, remotePeerId) => {
   if (!localPeerId || !remotePeerId) return false;
   return localPeerId.localeCompare(remotePeerId) < 0;
+};
+
+const isCallHealthy = (call) => {
+  if (!call || typeof call !== "object") return false;
+  if (call.open === false) return false;
+
+  const pc = call.peerConnection || call._pc || null;
+  if (!pc) return true;
+
+  const state = String(pc.connectionState || "").toLowerCase();
+  const iceState = String(pc.iceConnectionState || "").toLowerCase();
+  const closedStates = new Set(["closed", "failed", "disconnected"]);
+
+  if (closedStates.has(state)) return false;
+  if (!state && closedStates.has(iceState)) return false;
+  return true;
 };
 
 const parsePort = (value) => {
@@ -105,25 +155,34 @@ const buildPeerConnectionConfig = () => {
 const socket = SocketIoClient(WS_SERVER, {
   auth: REMOTE_CONTROL_TOKEN ? { token: REMOTE_CONTROL_TOKEN } : undefined,
   withCredentials: false,
-  // Some hosts (incl. some Render setups) may not reliably support WebSocket upgrade.
-  // Keep polling enabled so the app can connect, and upgrade when possible.
+  // Keep polling enabled so signaling still works when WebSocket upgrade is blocked.
+  // In local dev, WebSocket upgrade is disabled by default to avoid noisy probe failures
+  // like "Invalid frame header" on unstable/local network setups.
   transports: ["polling", "websocket"],
-  upgrade: true,
-  rememberUpgrade: true,
+  upgrade: SOCKET_ENABLE_WS_UPGRADE,
+  rememberUpgrade: SOCKET_ENABLE_WS_UPGRADE,
   timeout: 20000,
-  reconnectionAttempts: 10,
+  reconnection: true,
+  reconnectionAttempts: SOCKET_RECONNECT_ATTEMPTS,
+  reconnectionDelay: SOCKET_RECONNECT_DELAY_MS,
+  reconnectionDelayMax: SOCKET_RECONNECT_DELAY_MAX_MS,
+  randomizationFactor: 0.4,
 });
 
 export const SocketProvider = ({ children }) => {
   const navigate = useNavigate();
 
-  const [user, setUser] = useState(() => new Peer(UUIDv4(), buildPeerConnectionConfig()));
+  const [user, setUser] = useState(() => {
+    const stablePeerId = getOrCreateStablePeerId({ prefix: "peer" }) || UUIDv4();
+    return new Peer(stablePeerId, buildPeerConnectionConfig());
+  });
   const [stream, setStream] = useState(null);
   const [peers, dispatch] = useReducer(peerReducer, {});
 
   const callsRef = useRef({});
   const pendingParticipantsRef = useRef([]);
   const remoteSessionIdRef = useRef(null);
+  const remoteSessionHostIdRef = useRef("");
   const userRef = useRef(user);
   const streamRef = useRef(stream);
   const claimedRemoteHostIdRef = useRef("");
@@ -157,6 +216,10 @@ export const SocketProvider = ({ children }) => {
   const [remoteDesktopError, setRemoteDesktopError] = useState("");
   const [hostAppInstallPrompt, setHostAppInstallPrompt] = useState(null);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
+  const [browserOnline, setBrowserOnline] = useState(
+    typeof navigator === "undefined" ? true : navigator.onLine !== false
+  );
+  const manualShutdownRef = useRef(false);
 
   const logRemote = (eventName, payload = undefined) => {
     if (!REMOTE_DEBUG_ENABLED) return;
@@ -214,6 +277,83 @@ export const SocketProvider = ({ children }) => {
       .filter((pc) => !!pc && typeof pc.getStats === "function");
   }, []);
 
+  const clearAllPeerConnections = useCallback(() => {
+    const activePeerIds = Object.keys(callsRef.current);
+
+    activePeerIds.forEach((peerId) => {
+      const activeCall = callsRef.current[peerId];
+      try {
+        activeCall?.close?.();
+      } catch {
+        // noop
+      }
+      delete callsRef.current[peerId];
+      dispatch(removePeerAction(peerId));
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!user) return () => {};
+
+    const onOpen = (peerId) => {
+      const normalizedPeerId = String(peerId || "").trim();
+      if (!normalizedPeerId) return;
+      saveStablePeerId(normalizedPeerId);
+    };
+
+    const onDisconnected = () => {
+      if (manualShutdownRef.current) return;
+      try {
+        user.reconnect();
+      } catch {
+        // noop
+      }
+    };
+
+    const onError = (err) => {
+      if (manualShutdownRef.current) return;
+
+      const errorType = String(err?.type || "").trim().toLowerCase();
+      if (errorType === "unavailable-id") {
+        const fallbackPeerId = rotateStablePeerId({ prefix: "peer" }) || UUIDv4();
+        clearAllPeerConnections();
+        try {
+          user.destroy();
+        } catch {
+          // noop
+        }
+        setUser(new Peer(fallbackPeerId, buildPeerConnectionConfig()));
+        return;
+      }
+
+      if (
+        errorType === "network" ||
+        errorType === "server-error" ||
+        errorType === "socket-error"
+      ) {
+        try {
+          user.reconnect();
+        } catch {
+          // noop
+        }
+      }
+    };
+
+    user.on("open", onOpen);
+    user.on("disconnected", onDisconnected);
+    user.on("error", onError);
+
+    return () => {
+      try {
+        user.off("open", onOpen);
+        user.off("disconnected", onDisconnected);
+        user.off("error", onError);
+      } catch {
+        // noop
+      }
+    };
+  }, [clearAllPeerConnections, user]);
+
   const stopAdaptiveVideo = useCallback(() => {
     const controller = adaptiveVideoControllerRef.current;
     if (!controller) return;
@@ -248,6 +388,33 @@ export const SocketProvider = ({ children }) => {
       socket.off("connect_error", onConnectError);
     };
   }, [refreshRemoteHosts]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return () => {};
+
+    const onOnline = () => {
+      setBrowserOnline(true);
+      if (!socket.connected && typeof socket.connect === "function") {
+        socket.connect();
+      }
+    };
+
+    const onOffline = () => {
+      setBrowserOnline(false);
+      if (typeof socket.disconnect === "function") {
+        // Stop reconnection churn while browser is explicitly offline.
+        socket.disconnect();
+      }
+    };
+
+    window.addEventListener("online", onOnline);
+    window.addEventListener("offline", onOffline);
+
+    return () => {
+      window.removeEventListener("online", onOnline);
+      window.removeEventListener("offline", onOffline);
+    };
+  }, []);
 
   const provideStream = async (isVideoCall = true) => {
     const mediaApiMissing = !navigator.mediaDevices?.getUserMedia;
@@ -343,8 +510,10 @@ export const SocketProvider = ({ children }) => {
       delete callsRef.current[peerId];
     });
 
-    call.on("error", (err) => {
-      void err;
+    call.on("error", () => {
+      if (callsRef.current[peerId] !== call) return;
+      dispatch(removePeerAction(peerId));
+      delete callsRef.current[peerId];
     });
   }, []);
 
@@ -370,6 +539,21 @@ export const SocketProvider = ({ children }) => {
       : [];
 
     setRoomParticipants(uniqueParticipants);
+    const participantSet = new Set(uniqueParticipants);
+
+    Object.keys(callsRef.current).forEach((existingPeerId) => {
+      const existingCall = callsRef.current[existingPeerId];
+      if (!participantSet.has(existingPeerId) || !isCallHealthy(existingCall)) {
+        try {
+          existingCall?.close?.();
+        } catch {
+          // noop
+        }
+        delete callsRef.current[existingPeerId];
+        dispatch(removePeerAction(existingPeerId));
+      }
+    });
+
     if (uniqueParticipants.length === 0) return;
 
     const localUser = userRef.current;
@@ -379,10 +563,21 @@ export const SocketProvider = ({ children }) => {
       uniqueParticipants.forEach((pid) => {
         if (pid === localUser.id) return;
         if (!shouldInitiateCall(localUser.id, pid)) return;
-        if (!callsRef.current[pid]) {
-          const call = localUser.call(pid, localStream);
-          setupCallHandlers(call, pid);
+
+        const existingCall = callsRef.current[pid];
+        if (existingCall && isCallHealthy(existingCall)) return;
+        if (existingCall) {
+          try {
+            existingCall.close();
+          } catch {
+            // noop
+          }
+          delete callsRef.current[pid];
+          dispatch(removePeerAction(pid));
         }
+
+        const call = localUser.call(pid, localStream);
+        setupCallHandlers(call, pid);
       });
     } else {
       pendingParticipantsRef.current = [
@@ -615,8 +810,16 @@ export const SocketProvider = ({ children }) => {
     const onUserLeft = ({ peerId }) => {
       if (!peerId) return;
 
+      const existingCall = callsRef.current[peerId];
+      if (existingCall) {
+        try {
+          existingCall.close();
+        } catch {
+          // noop
+        }
+        delete callsRef.current[peerId];
+      }
       dispatch(removePeerAction(peerId));
-      delete callsRef.current[peerId];
       setRoomParticipants((prev) => prev.filter((id) => id !== peerId));
     };
 
@@ -686,6 +889,7 @@ export const SocketProvider = ({ children }) => {
       logRemote("session-started", { sessionId, hostId });
       if (!sessionId) return;
       remoteSessionIdRef.current = sessionId;
+      remoteSessionHostIdRef.current = String(hostId || "").trim();
       remoteDesktopPendingRequestRef.current = null;
       hasRemoteDesktopFrameRef.current = false;
       setRemoteDesktopSession({ sessionId, hostId });
@@ -731,6 +935,7 @@ export const SocketProvider = ({ children }) => {
           if (claimedRemoteHostIdRef.current !== pendingAutoClaimHostId) {
             socket.emit("remote-host-claim", { hostId: pendingAutoClaimHostId });
           }
+          autoClaimRemoteHostIdRef.current = "";
           setAutoClaimRemoteHostId("");
         }
       }
@@ -746,6 +951,7 @@ export const SocketProvider = ({ children }) => {
           !remoteDesktopPendingRequestRef.current
         ) {
           requestRemoteDesktopSession(pendingAutoRequestHostId);
+          autoRequestRemoteHostIdRef.current = "";
           setAutoRequestRemoteHostId("");
         }
       }
@@ -763,6 +969,7 @@ export const SocketProvider = ({ children }) => {
       if (!sessionId) return;
       if (remoteSessionIdRef.current === sessionId) {
         remoteSessionIdRef.current = null;
+        remoteSessionHostIdRef.current = "";
       }
 
       setRemoteDesktopSession((prev) => {
@@ -826,7 +1033,17 @@ export const SocketProvider = ({ children }) => {
 
     const onSocketDisconnect = () => {
       logRemote("socket-disconnect");
+      const activeSessionHostId = String(remoteSessionHostIdRef.current || "").trim();
+      const pendingRequestHostId = String(remoteDesktopPendingRequestRef.current?.hostId || "").trim();
+      const reconnectClaimHostId = String(claimedRemoteHostIdRef.current || "").trim();
+      const reconnectAutoRequestHostId = String(
+        autoRequestRemoteHostIdRef.current || activeSessionHostId || pendingRequestHostId
+      ).trim();
+
+      clearAllPeerConnections();
+      pendingParticipantsRef.current = [];
       remoteSessionIdRef.current = null;
+      remoteSessionHostIdRef.current = "";
       remoteDesktopPendingRequestRef.current = null;
       claimedRemoteHostIdRef.current = "";
       setRemoteDesktopSession(null);
@@ -841,8 +1058,10 @@ export const SocketProvider = ({ children }) => {
       setRemoteHosts([]);
       setRoomParticipants([]);
       setClaimedRemoteHostId("");
-      setAutoClaimRemoteHostId("");
-      setAutoRequestRemoteHostId("");
+      autoClaimRemoteHostIdRef.current = reconnectClaimHostId;
+      autoRequestRemoteHostIdRef.current = reconnectAutoRequestHostId;
+      setAutoClaimRemoteHostId(reconnectClaimHostId);
+      setAutoRequestRemoteHostId(reconnectAutoRequestHostId);
     };
 
     socket.on("room-created", enterRoom);
@@ -880,7 +1099,7 @@ export const SocketProvider = ({ children }) => {
       socket.off("remote-session-error", onRemoteSessionError);
       socket.off("disconnect", onSocketDisconnect);
     };
-  }, [fetchParticipantList, navigate, requestRemoteDesktopSession]);
+  }, [clearAllPeerConnections, fetchParticipantList, navigate, requestRemoteDesktopSession]);
 
   useEffect(() => {
     refreshRemoteHosts();
@@ -900,10 +1119,20 @@ export const SocketProvider = ({ children }) => {
         prev.includes(peerId) ? prev : [...prev, peerId]
       );
       if (!shouldInitiateCall(user.id, peerId)) return;
-      if (!callsRef.current[peerId]) {
-        const call = user.call(peerId, stream);
-        setupCallHandlers(call, peerId);
+      const existingCall = callsRef.current[peerId];
+      if (existingCall && isCallHealthy(existingCall)) return;
+      if (existingCall) {
+        try {
+          existingCall.close();
+        } catch {
+          // noop
+        }
+        delete callsRef.current[peerId];
+        dispatch(removePeerAction(peerId));
       }
+
+      const call = user.call(peerId, stream);
+      setupCallHandlers(call, peerId);
     };
 
     socket.on("user-joined", onUserJoined);
@@ -917,10 +1146,20 @@ export const SocketProvider = ({ children }) => {
       pendingParticipantsRef.current.forEach((pid) => {
         if (pid === user.id) return;
         if (!shouldInitiateCall(user.id, pid)) return;
-        if (!callsRef.current[pid]) {
-          const call = user.call(pid, stream);
-          setupCallHandlers(call, pid);
+        const existingCall = callsRef.current[pid];
+        if (existingCall && isCallHealthy(existingCall)) return;
+        if (existingCall) {
+          try {
+            existingCall.close();
+          } catch {
+            // noop
+          }
+          delete callsRef.current[pid];
+          dispatch(removePeerAction(pid));
         }
+
+        const call = user.call(pid, stream);
+        setupCallHandlers(call, pid);
       });
       pendingParticipantsRef.current = [];
     }
@@ -965,20 +1204,14 @@ export const SocketProvider = ({ children }) => {
   };
 
   const endCall = (roomId) => {
+    manualShutdownRef.current = true;
     stopAdaptiveVideo();
 
     if (remoteDesktopSession?.sessionId) {
       socket.emit("remote-session-stop", { sessionId: remoteDesktopSession.sessionId });
     }
 
-    Object.keys(callsRef.current).forEach((peerId) => {
-      try {
-        callsRef.current[peerId].close();
-      } catch {
-        // noop
-      }
-      delete callsRef.current[peerId];
-    });
+    clearAllPeerConnections();
 
     try {
       if (user) user.destroy();
@@ -997,6 +1230,7 @@ export const SocketProvider = ({ children }) => {
     setRemoteHostSetupPending(null);
     setRemoteHostSetupStatus("");
     remoteSessionIdRef.current = null;
+    remoteSessionHostIdRef.current = "";
     hasRemoteDesktopFrameRef.current = false;
     setHasRemoteDesktopFrame(false);
     setRemoteDesktopError("");
@@ -1051,6 +1285,7 @@ export const SocketProvider = ({ children }) => {
         remoteDesktopError,
         hostAppInstallPrompt,
         socketConnected,
+        browserOnline,
         provideStream,
         toggleMic,
         toggleCamera,

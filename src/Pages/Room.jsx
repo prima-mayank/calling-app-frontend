@@ -42,6 +42,23 @@ const copyTextFallback = async (text) => {
   return copied;
 };
 
+const preventDefaultIfCancelable = (event) => {
+  if (!event || typeof event.preventDefault !== "function") return;
+  if (typeof event.cancelable === "boolean" && !event.cancelable) return;
+  event.preventDefault();
+};
+
+const isLocalHostName = (hostname) => {
+  const value = String(hostname || "").trim().toLowerCase();
+  return value === "localhost" || value === "127.0.0.1" || value === "::1";
+};
+
+const isInsecureContextOnLanIp = () => {
+  if (typeof window === "undefined") return false;
+  if (window.isSecureContext) return false;
+  return !isLocalHostName(window.location?.hostname);
+};
+
 const Room = () => {
   const { id } = useParams();
   const {
@@ -63,6 +80,8 @@ const Room = () => {
     hasRemoteDesktopFrame,
     remoteDesktopError,
     hostAppInstallPrompt,
+    socketConnected,
+    browserOnline,
     provideStream,
     toggleMic,
     toggleCamera,
@@ -104,6 +123,13 @@ const Room = () => {
   const joinRoomWithMode = useCallback(async (mode) => {
     if (mode === "none") {
       setHasJoined(true);
+      return;
+    }
+
+    if (isInsecureContextOnLanIp()) {
+      alert(
+        "Camera/mic on local IP needs HTTPS. Use localhost on this machine or open the app via an HTTPS tunnel/domain."
+      );
       return;
     }
 
@@ -157,6 +183,10 @@ const Room = () => {
         roomId: id,
         peerId,
       });
+
+      if (hasJoined) {
+        socket.emit("ready");
+      }
     };
 
     if (socket.connected) {
@@ -168,7 +198,7 @@ const Room = () => {
     return () => {
       socket.off("connect", emitJoinRoom);
     };
-  }, [id, socket, user?.id]);
+  }, [hasJoined, id, socket, user?.id]);
 
   useEffect(() => {
     const unsubscribe = subscribeRemoteDesktopFrame((frameDataUrl) => {
@@ -234,13 +264,13 @@ const Room = () => {
     const onKeyDown = (event) => {
       if (isTypingTarget(event.target)) return;
       if (event.key === "Escape") {
-        event.preventDefault();
+        preventDefaultIfCancelable(event);
         releaseModifierKeys();
         setRemoteInputActive(false);
         return;
       }
 
-      event.preventDefault();
+      preventDefaultIfCancelable(event);
       sendRemoteDesktopInput({
         type: "key-down",
         key: event.key,
@@ -251,7 +281,7 @@ const Room = () => {
 
     const onKeyUp = (event) => {
       if (isTypingTarget(event.target)) return;
-      event.preventDefault();
+      preventDefaultIfCancelable(event);
       sendRemoteDesktopInput({
         type: "key-up",
         key: event.key,
@@ -403,7 +433,7 @@ const Room = () => {
     }
     if (!remoteDesktopSession) return;
 
-    event.preventDefault();
+    preventDefaultIfCancelable(event);
     const pointer = buildPointerPayload(event);
     if (!pointer) return;
 
@@ -417,7 +447,7 @@ const Room = () => {
   const handleRemoteMouseDown = (event) => {
     if (!remoteDesktopSession || !isControlActive) return;
 
-    event.preventDefault();
+    preventDefaultIfCancelable(event);
     const pointer = buildPointerPayload(event);
     if (!pointer) return;
 
@@ -431,7 +461,7 @@ const Room = () => {
   const handleRemoteMouseUp = (event) => {
     if (!remoteDesktopSession || !isControlActive) return;
 
-    event.preventDefault();
+    preventDefaultIfCancelable(event);
     const pointer = buildPointerPayload(event);
     if (!pointer) return;
 
@@ -445,7 +475,7 @@ const Room = () => {
   const handleRemoteWheel = (event) => {
     if (!remoteDesktopSession || !isControlActive) return;
 
-    event.preventDefault();
+    preventDefaultIfCancelable(event);
     const pointer = buildPointerPayload(event);
     if (!pointer) return;
 
@@ -477,7 +507,8 @@ const Room = () => {
     requestRemoteDesktopSession(effectiveSelectedRemoteHostId);
   };
 
-  const isControlActive = remoteInputActive && !!remoteDesktopSession;
+  const isControlActive =
+    remoteInputActive && !!remoteDesktopSession && socketConnected && browserOnline;
   const shouldShowRemotePanel = showRemotePanel || hasRemoteActivity;
   const hasVideoTrack = !!stream && stream.getVideoTracks().length > 0;
   const otherParticipants = [
@@ -588,7 +619,7 @@ const Room = () => {
 
     const touch = getPrimaryTouch(event);
     if (!touch) return;
-    event.preventDefault();
+    preventDefaultIfCancelable(event);
 
     const pointer = buildPointerPayloadFromClient(touch.clientX, touch.clientY);
     if (!pointer) return;
@@ -615,7 +646,7 @@ const Room = () => {
 
     const touch = getPrimaryTouch(event);
     if (!touch) return;
-    event.preventDefault();
+    preventDefaultIfCancelable(event);
 
     const now = Date.now();
     if (now - moveThrottleRef.current < MOVE_EVENT_THROTTLE_MS) return;
@@ -641,7 +672,7 @@ const Room = () => {
 
   const finishTouchInteraction = (event) => {
     if (!remoteDesktopSession || !touchStateRef.current.active) return;
-    event.preventDefault();
+    preventDefaultIfCancelable(event);
 
     const touch = getPrimaryTouch(event);
     const pointer = touch
@@ -691,6 +722,13 @@ const Room = () => {
               {participantCount} participant{participantCount === 1 ? "" : "s"}
             </span>
           </p>
+          <div className={`connection-pill ${socketConnected && browserOnline ? "connection-pill--online" : ""}`}>
+            {!browserOnline
+              ? "Internet offline"
+              : socketConnected
+              ? "Realtime connected"
+              : "Reconnecting to server..."}
+          </div>
         </div>
       </div>
 
@@ -963,7 +1001,7 @@ const Room = () => {
               onTouchMove={handleTouchMove}
               onTouchEnd={handleTouchEnd}
               onTouchCancel={handleTouchCancel}
-              onContextMenu={(event) => event.preventDefault()}
+              onContextMenu={preventDefaultIfCancelable}
               className={`remote-surface ${isControlActive ? "remote-surface--active" : ""}`}
             >
               {hasRemoteDesktopFrame ? (

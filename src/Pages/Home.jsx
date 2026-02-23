@@ -4,6 +4,17 @@ import { SocketContext } from "../Context/socketContextValue";
 
 const HOME_JOIN_PREF_KEY = "home_join_pref_v1";
 
+const isLocalHostName = (hostname) => {
+  const value = String(hostname || "").trim().toLowerCase();
+  return value === "localhost" || value === "127.0.0.1" || value === "::1";
+};
+
+const isInsecureContextOnLanIp = () => {
+  if (typeof window === "undefined") return false;
+  if (window.isSecureContext) return false;
+  return !isLocalHostName(window.location?.hostname);
+};
+
 const Home = () => {
   const { socket, provideStream, socketConnected } = useContext(SocketContext);
 
@@ -21,6 +32,18 @@ const Home = () => {
       );
     } catch {
       // noop
+    }
+
+    if (isInsecureContextOnLanIp()) {
+      try {
+        sessionStorage.removeItem(HOME_JOIN_PREF_KEY);
+      } catch {
+        // noop
+      }
+      alert(
+        "Camera/mic on local IP needs HTTPS. Use localhost on this machine or open the app via an HTTPS tunnel/domain."
+      );
+      return;
     }
 
     const stream = await provideStream(isVideo);
