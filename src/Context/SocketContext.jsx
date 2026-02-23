@@ -108,6 +108,14 @@ const isCallHealthy = (call) => {
   return true;
 };
 
+const isPeerReadyForCalls = (peer) => {
+  if (!peer || typeof peer !== "object") return false;
+  if (peer.destroyed) return false;
+  if (peer.disconnected) return false;
+  if (peer.open !== true) return false;
+  return !!String(peer.id || "").trim();
+};
+
 const parsePort = (value) => {
   const port = Number(value);
   if (!Number.isFinite(port) || port <= 0) return null;
@@ -401,10 +409,6 @@ export const SocketProvider = ({ children }) => {
 
     const onOffline = () => {
       setBrowserOnline(false);
-      if (typeof socket.disconnect === "function") {
-        // Stop reconnection churn while browser is explicitly offline.
-        socket.disconnect();
-      }
     };
 
     window.addEventListener("online", onOnline);
@@ -517,6 +521,79 @@ export const SocketProvider = ({ children }) => {
     });
   }, []);
 
+  const addPendingParticipants = useCallback((participantIds = []) => {
+    const normalized = Array.isArray(participantIds)
+      ? participantIds
+          .map((item) => String(item || "").trim())
+          .filter(Boolean)
+      : [];
+
+    if (normalized.length === 0) return;
+
+    pendingParticipantsRef.current = [
+      ...new Set([...pendingParticipantsRef.current, ...normalized]),
+    ];
+  }, []);
+
+  const startCallToParticipant = useCallback((localUser, localStream, peerId) => {
+    const normalizedPeerId = String(peerId || "").trim();
+    if (!normalizedPeerId || !localUser || !localStream) return false;
+    if (normalizedPeerId === localUser.id) return true;
+    if (!shouldInitiateCall(localUser.id, normalizedPeerId)) return true;
+
+    const existingCall = callsRef.current[normalizedPeerId];
+    if (existingCall && isCallHealthy(existingCall)) return true;
+    if (existingCall) {
+      try {
+        existingCall.close();
+      } catch {
+        // noop
+      }
+      delete callsRef.current[normalizedPeerId];
+      dispatch(removePeerAction(normalizedPeerId));
+    }
+
+    if (!isPeerReadyForCalls(localUser)) return false;
+
+    try {
+      const call = localUser.call(normalizedPeerId, localStream);
+      setupCallHandlers(call, normalizedPeerId);
+      return true;
+    } catch {
+      return false;
+    }
+  }, [setupCallHandlers]);
+
+  const drainPendingParticipants = useCallback((peerOverride = null, streamOverride = null) => {
+    const localUser = peerOverride || userRef.current;
+    const localStream = streamOverride || streamRef.current;
+    if (!isPeerReadyForCalls(localUser) || !localStream) return false;
+
+    const queued = [...new Set(
+      pendingParticipantsRef.current
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+    )];
+    if (queued.length === 0) return true;
+
+    pendingParticipantsRef.current = [];
+    const failed = [];
+
+    queued.forEach((participantId) => {
+      const started = startCallToParticipant(localUser, localStream, participantId);
+      if (!started) {
+        failed.push(participantId);
+      }
+    });
+
+    if (failed.length > 0) {
+      addPendingParticipants(failed);
+      return false;
+    }
+
+    return true;
+  }, [addPendingParticipants, startCallToParticipant]);
+
   const replaceOutgoingVideoTrack = useCallback(async (nextTrack) => {
     const calls = Object.values(callsRef.current);
     await Promise.all(
@@ -558,33 +635,18 @@ export const SocketProvider = ({ children }) => {
 
     const localUser = userRef.current;
     const localStream = streamRef.current;
-
-    if (localUser && localStream) {
-      uniqueParticipants.forEach((pid) => {
-        if (pid === localUser.id) return;
-        if (!shouldInitiateCall(localUser.id, pid)) return;
-
-        const existingCall = callsRef.current[pid];
-        if (existingCall && isCallHealthy(existingCall)) return;
-        if (existingCall) {
-          try {
-            existingCall.close();
-          } catch {
-            // noop
-          }
-          delete callsRef.current[pid];
-          dispatch(removePeerAction(pid));
-        }
-
-        const call = localUser.call(pid, localStream);
-        setupCallHandlers(call, pid);
-      });
-    } else {
-      pendingParticipantsRef.current = [
-        ...new Set([...pendingParticipantsRef.current, ...uniqueParticipants]),
-      ];
+    if (!isPeerReadyForCalls(localUser) || !localStream) {
+      addPendingParticipants(uniqueParticipants);
+      return;
     }
-  }, [setupCallHandlers]);
+
+    uniqueParticipants.forEach((participantId) => {
+      const started = startCallToParticipant(localUser, localStream, participantId);
+      if (!started) {
+        addPendingParticipants([participantId]);
+      }
+    });
+  }, [addPendingParticipants, startCallToParticipant]);
 
   const requestRemoteDesktopSession = useCallback((hostId = "") => {
     logRemote("request-session", { hostId: String(hostId || "").trim() });
@@ -1118,64 +1180,55 @@ export const SocketProvider = ({ children }) => {
       setRoomParticipants((prev) =>
         prev.includes(peerId) ? prev : [...prev, peerId]
       );
-      if (!shouldInitiateCall(user.id, peerId)) return;
-      const existingCall = callsRef.current[peerId];
-      if (existingCall && isCallHealthy(existingCall)) return;
-      if (existingCall) {
-        try {
-          existingCall.close();
-        } catch {
-          // noop
-        }
-        delete callsRef.current[peerId];
-        dispatch(removePeerAction(peerId));
+      if (!isPeerReadyForCalls(user)) {
+        addPendingParticipants([peerId]);
+        return;
       }
 
-      const call = user.call(peerId, stream);
-      setupCallHandlers(call, peerId);
+      const started = startCallToParticipant(user, stream, peerId);
+      if (!started) {
+        addPendingParticipants([peerId]);
+      }
     };
 
     socket.on("user-joined", onUserJoined);
 
     const emitReady = () => {
+      if (!isPeerReadyForCalls(user)) return;
       socket.emit("ready");
     };
-    socket.on("connect", emitReady);
+    const onSocketConnect = () => {
+      emitReady();
+      void drainPendingParticipants(user, stream);
+    };
+    const onPeerOpen = () => {
+      emitReady();
+      void drainPendingParticipants(user, stream);
+    };
 
-    if (pendingParticipantsRef.current.length > 0) {
-      pendingParticipantsRef.current.forEach((pid) => {
-        if (pid === user.id) return;
-        if (!shouldInitiateCall(user.id, pid)) return;
-        const existingCall = callsRef.current[pid];
-        if (existingCall && isCallHealthy(existingCall)) return;
-        if (existingCall) {
-          try {
-            existingCall.close();
-          } catch {
-            // noop
-          }
-          delete callsRef.current[pid];
-          dispatch(removePeerAction(pid));
-        }
+    socket.on("connect", onSocketConnect);
+    user.on("open", onPeerOpen);
 
-        const call = user.call(pid, stream);
-        setupCallHandlers(call, pid);
-      });
-      pendingParticipantsRef.current = [];
-    }
-
-    emitReady();
+    onSocketConnect();
 
     return () => {
       try {
         user.off("call");
+        user.off("open", onPeerOpen);
       } catch {
         // noop
       }
-      socket.off("connect", emitReady);
+      socket.off("connect", onSocketConnect);
       socket.off("user-joined", onUserJoined);
     };
-  }, [setupCallHandlers, stream, user]);
+  }, [
+    addPendingParticipants,
+    drainPendingParticipants,
+    setupCallHandlers,
+    startCallToParticipant,
+    stream,
+    user,
+  ]);
 
   const toggleMic = () => {
     if (!stream) return;
