@@ -11,6 +11,7 @@ import { useRemotePointerHandlers } from "../features/remoteDesktop/hooks/useRem
 import { useRoomDerivedState } from "../features/room/hooks/useRoomDerivedState";
 import { copyTextFallback, isInsecureContextOnLanIp } from "../features/room/utils/roomAccessHelpers";
 import { registerRemoteKeyboardControl } from "../features/remoteDesktop/utils/remoteKeyboardControl";
+import { isPeerReadyForCalls } from "../utils/peerCallUtils";
 
 const HOME_JOIN_PREF_KEY = "home_join_pref_v1";
 const HOME_JOIN_PREF_MAX_AGE_MS = 5 * 60 * 1000;
@@ -143,7 +144,7 @@ const Room = () => {
         peerId,
       });
 
-      if (hasJoined) {
+      if (hasJoined && isPeerReadyForCalls(user)) {
         socket.emit("ready");
       }
     };
@@ -157,7 +158,7 @@ const Room = () => {
     return () => {
       socket.off("connect", emitJoinRoom);
     };
-  }, [hasJoined, id, socket, user?.id]);
+  }, [hasJoined, id, socket, user, user?.id]);
 
   useEffect(() => {
     const unsubscribe = subscribeRemoteDesktopFrame((frameDataUrl) => {

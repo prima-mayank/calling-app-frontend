@@ -87,6 +87,21 @@ export const SocketProvider = ({ children }) => {
     console.debug(`[remote-ui] ${normalizedEventName}`, payload);
   };
 
+  const reconnectPeerIfNeeded = useCallback(() => {
+    const activeUser = userRef.current;
+    if (!activeUser || manualShutdownRef.current) return false;
+    if (activeUser.destroyed) return false;
+    if (!activeUser.disconnected) return false;
+    if (typeof activeUser.reconnect !== "function") return false;
+
+    try {
+      activeUser.reconnect();
+      return true;
+    } catch {
+      return false;
+    }
+  }, [userRef]);
+
   const subscribeRemoteDesktopFrame = useCallback((listener) => {
     if (typeof listener !== "function") {
       return () => {};
@@ -123,6 +138,11 @@ export const SocketProvider = ({ children }) => {
       const normalizedPeerId = String(peerId || "").trim();
       if (!normalizedPeerId) return;
       saveStablePeerId(normalizedPeerId);
+
+      if (socket.connected) {
+        socket.emit("ready");
+        void drainPendingParticipants(user, streamRef.current);
+      }
     };
 
     const onDisconnected = () => {
@@ -176,7 +196,7 @@ export const SocketProvider = ({ children }) => {
         // noop
       }
     };
-  }, [clearAllPeerConnections, user]);
+  }, [clearAllPeerConnections, drainPendingParticipants, streamRef, user]);
 
   const stopAdaptiveVideo = useCallback(() => {
     const controller = adaptiveVideoControllerRef.current;
@@ -222,6 +242,7 @@ export const SocketProvider = ({ children }) => {
     const onConnect = () => {
       setSocketConnected(true);
       refreshRemoteHosts();
+      reconnectPeerIfNeeded();
     };
     const onDisconnect = () => setSocketConnected(false);
     const onConnectError = () => setSocketConnected(false);
@@ -235,13 +256,14 @@ export const SocketProvider = ({ children }) => {
       socket.off("disconnect", onDisconnect);
       socket.off("connect_error", onConnectError);
     };
-  }, [refreshRemoteHosts]);
+  }, [reconnectPeerIfNeeded, refreshRemoteHosts]);
 
   useEffect(() => {
     if (typeof window === "undefined") return () => {};
 
     const onOnline = () => {
       setBrowserOnline(true);
+      reconnectPeerIfNeeded();
       if (!socket.connected && typeof socket.connect === "function") {
         socket.connect();
       }
@@ -258,7 +280,7 @@ export const SocketProvider = ({ children }) => {
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
     };
-  }, []);
+  }, [reconnectPeerIfNeeded]);
 
   const provideStream = async (isVideoCall = true) => {
     const mediaApiMissing = !navigator.mediaDevices?.getUserMedia;
@@ -507,6 +529,7 @@ export const SocketProvider = ({ children }) => {
       socket.emit("ready");
     };
     const onSocketConnect = () => {
+      reconnectPeerIfNeeded();
       emitReady();
       void drainPendingParticipants(user, stream);
     };
@@ -533,6 +556,7 @@ export const SocketProvider = ({ children }) => {
   }, [
     addPendingParticipants,
     drainPendingParticipants,
+    reconnectPeerIfNeeded,
     setupCallHandlers,
     startCallToParticipant,
     stream,
