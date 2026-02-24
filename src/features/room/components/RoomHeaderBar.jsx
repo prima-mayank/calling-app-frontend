@@ -4,7 +4,12 @@ const RoomHeaderBar = ({
   participantCount,
   socketConnected,
   browserOnline,
+  connectionQualityStatus,
 }) => {
+  const qualityLabel = connectionQualityStatus?.label || "Checking";
+  const qualityTone = connectionQualityStatus?.tone || "checking";
+  const qualityDetail = connectionQualityStatus?.detail || "";
+
   return (
     <div className="room-header panel">
       <div className="room-header-main">
@@ -23,6 +28,10 @@ const RoomHeaderBar = ({
             ? "Realtime connected"
             : "Reconnecting to server..."}
         </div>
+        <div className={`quality-pill quality-pill--${qualityTone}`}>
+          Network Quality: {qualityLabel}
+        </div>
+        {qualityDetail && <div className="room-quality-detail">{qualityDetail}</div>}
       </div>
     </div>
   );

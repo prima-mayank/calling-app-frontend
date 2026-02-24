@@ -1,4 +1,5 @@
 import UserFeedPlayer from "../../../components/UserFeedPlayer";
+import ParticipantActions from "./ParticipantActions";
 
 const RoomFeeds = ({
   isVideoSpotlightActive,
@@ -11,20 +12,42 @@ const RoomFeeds = ({
   peers,
   participantsWithoutMedia,
   toggleZoom,
+  isPeerMuted,
+  togglePeerMuted,
 }) => {
+  const getPeerIdFromTile = (tileId = "") => {
+    const normalizedTileId = String(tileId || "");
+    return normalizedTileId.startsWith("peer:") ? normalizedTileId.slice(5) : "";
+  };
+
+  const getTileMutedState = (tile) => {
+    if (!tile) return false;
+    if (tile.isLocal) return !!tile.muted;
+    const peerId = getPeerIdFromTile(tile.id);
+    return !!tile.muted || !!isPeerMuted(peerId);
+  };
+
   if (isVideoSpotlightActive) {
+    const activePeerId = getPeerIdFromTile(activeVideoTile?.id);
+    const showActiveMute = !!activePeerId;
+    const activeMuted = getTileMutedState(activeVideoTile);
+
     return (
       <div className="spotlight-layout">
         <div className="spotlight-main panel">
           <div className="spotlight-main-header">
             <h4 className="feed-title">{activeVideoTile.label}</h4>
-            <button onClick={() => setZoomTarget("")} className="btn btn-secondary feed-zoom-btn">
-              Unzoom
-            </button>
+            <ParticipantActions
+              onZoom={() => setZoomTarget("")}
+              zoomLabel="Unzoom"
+              showMute={showActiveMute}
+              isMuted={activeMuted}
+              onToggleMute={() => togglePeerMuted(activePeerId)}
+            />
           </div>
           <UserFeedPlayer
             stream={activeVideoTile.stream}
-            muted={activeVideoTile.muted}
+            muted={activeMuted}
             isLocal={activeVideoTile.isLocal}
           />
         </div>
@@ -32,17 +55,27 @@ const RoomFeeds = ({
         <div className="spotlight-strip">
           {videoTiles
             .filter((tile) => tile.id !== activeVideoTile.id)
-            .map((tile) => (
-              <div key={tile.id} className="spotlight-tile">
-                <div className="participant-card-header">
-                  <div className="participant-name">{tile.label}</div>
-                  <button onClick={() => setZoomTarget(tile.id)} className="btn btn-secondary feed-zoom-btn">
-                    Focus
-                  </button>
+            .map((tile) => {
+              const peerId = getPeerIdFromTile(tile.id);
+              const showMute = !!peerId;
+              const isMuted = getTileMutedState(tile);
+
+              return (
+                <div key={tile.id} className="spotlight-tile">
+                  <div className="participant-card-header">
+                    <div className="participant-name">{tile.label}</div>
+                    <ParticipantActions
+                      onZoom={() => setZoomTarget(tile.id)}
+                      zoomLabel="Focus"
+                      showMute={showMute}
+                      isMuted={isMuted}
+                      onToggleMute={() => togglePeerMuted(peerId)}
+                    />
+                  </div>
+                  <UserFeedPlayer stream={tile.stream} muted={isMuted} isLocal={tile.isLocal} />
                 </div>
-                <UserFeedPlayer stream={tile.stream} muted={tile.muted} isLocal={tile.isLocal} />
-              </div>
-            ))}
+              );
+            })}
         </div>
       </div>
     );
@@ -55,9 +88,10 @@ const RoomFeeds = ({
           <h4 className="feed-title">
             You {!stream && "(No Media)"} {stream && !hasVideoTrack && "(Audio Only)"}
           </h4>
-          <button onClick={() => toggleZoom("local")} className="btn btn-secondary feed-zoom-btn">
-            Zoom
-          </button>
+          <ParticipantActions
+            onZoom={() => toggleZoom("local")}
+            zoomLabel="Zoom"
+          />
         </div>
         <UserFeedPlayer stream={stream} muted={true} isLocal />
       </div>
@@ -73,11 +107,15 @@ const RoomFeeds = ({
             <div key={peerId} className="participant-card">
               <div className="participant-card-header">
                 <div className="participant-name">{peerId}</div>
-                <button onClick={() => toggleZoom(`peer:${peerId}`)} className="btn btn-secondary feed-zoom-btn">
-                  Zoom
-                </button>
+                <ParticipantActions
+                  onZoom={() => toggleZoom(`peer:${peerId}`)}
+                  zoomLabel="Zoom"
+                  showMute={true}
+                  isMuted={isPeerMuted(peerId)}
+                  onToggleMute={() => togglePeerMuted(peerId)}
+                />
               </div>
-              <UserFeedPlayer stream={peers[peerId].stream} muted={false} />
+              <UserFeedPlayer stream={peers[peerId].stream} muted={isPeerMuted(peerId)} />
             </div>
           ))}
 

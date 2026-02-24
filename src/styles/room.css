@@ -14,6 +14,10 @@
   min-width: 0;
 }
 
+.room-header .connection-pill {
+  margin-top: 10px;
+}
+
 .room-title {
   font-size: clamp(1.02rem, 2.2vw, 1.35rem);
   margin-bottom: 6px;
@@ -45,6 +49,50 @@
 
 .room-meta-sep {
   opacity: 0.65;
+}
+
+.quality-pill {
+  margin-top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  color: var(--text-1);
+  border-radius: 999px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-0);
+  background: rgba(23, 39, 61, 0.72);
+}
+
+.quality-pill::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #95a7bf;
+}
+
+.quality-pill--excellent::before,
+.quality-pill--good::before {
+  background: var(--success-0);
+}
+
+.quality-pill--fair::before,
+.quality-pill--checking::before,
+.quality-pill--reconnecting::before {
+  background: var(--warning-0);
+}
+
+.quality-pill--poor::before,
+.quality-pill--bad::before,
+.quality-pill--offline::before {
+  background: var(--danger-0);
+}
+
+.room-quality-detail {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 0.8rem;
 }
 
 .room-toolbar {
@@ -120,6 +168,101 @@
 
 .remote-card-body {
   padding: 16px;
+}
+
+.remote-stepper {
+  margin-bottom: 12px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(153, 185, 255, 0.22);
+  background: rgba(10, 18, 31, 0.42);
+}
+
+.remote-stepper-track {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.remote-step {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px;
+  border-radius: 10px;
+  border: 1px solid rgba(126, 160, 224, 0.2);
+  background: rgba(11, 19, 34, 0.56);
+}
+
+.remote-step-indicator {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.76rem;
+  font-weight: 800;
+  border: 1px solid rgba(133, 166, 227, 0.42);
+  color: var(--text-2);
+}
+
+.remote-step-label {
+  font-size: 0.82rem;
+  color: var(--text-2);
+  font-weight: 700;
+}
+
+.remote-step--completed {
+  border-color: rgba(75, 209, 148, 0.36);
+  background: rgba(15, 49, 37, 0.48);
+}
+
+.remote-step--completed .remote-step-indicator {
+  background: rgba(75, 209, 148, 0.25);
+  border-color: rgba(75, 209, 148, 0.52);
+  color: #b7f5d8;
+}
+
+.remote-step--completed .remote-step-label {
+  color: #b7f5d8;
+}
+
+.remote-step--active {
+  border-color: rgba(231, 176, 90, 0.46);
+  background: rgba(63, 43, 15, 0.48);
+}
+
+.remote-step--active .remote-step-indicator {
+  background: rgba(231, 176, 90, 0.26);
+  border-color: rgba(231, 176, 90, 0.58);
+  color: #ffe4ba;
+}
+
+.remote-step--active .remote-step-label {
+  color: #ffe4ba;
+}
+
+.remote-step--error {
+  border-color: rgba(239, 111, 111, 0.48);
+  background: rgba(61, 21, 21, 0.5);
+}
+
+.remote-step--error .remote-step-indicator {
+  background: rgba(239, 111, 111, 0.26);
+  border-color: rgba(239, 111, 111, 0.58);
+  color: #ffd2d2;
+}
+
+.remote-step--error .remote-step-label {
+  color: #ffd2d2;
+}
+
+.remote-stepper-caption {
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 0.8rem;
 }
 
 .remote-connect-row,
@@ -358,7 +501,20 @@
   color: var(--text-1);
 }
 
+.participant-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
 .feed-zoom-btn {
+  min-height: 34px;
+  padding: 6px 12px;
+  font-size: 0.82rem;
+}
+
+.feed-audio-btn {
   min-height: 34px;
   padding: 6px 12px;
   font-size: 0.82rem;
@@ -472,6 +628,10 @@
 
   .remote-surface {
     min-height: clamp(180px, 52vw, 320px);
+  }
+
+  .remote-stepper-track {
+    grid-template-columns: 1fr;
   }
 
   .participants-grid {

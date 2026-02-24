@@ -1,4 +1,5 @@
 import { preventDefaultIfCancelable } from "../utils/remoteInputHelpers";
+import RemoteRequestStepper from "./RemoteRequestStepper";
 
 const RemoteDesktopPanel = ({
   isVideoSpotlightActive,
@@ -56,6 +57,13 @@ const RemoteDesktopPanel = ({
       </div>
 
       <div className="remote-card-body">
+        <RemoteRequestStepper
+          remoteDesktopSession={remoteDesktopSession}
+          remoteDesktopPendingRequest={remoteDesktopPendingRequest}
+          incomingRemoteDesktopRequest={incomingRemoteDesktopRequest}
+          remoteDesktopError={remoteDesktopError}
+        />
+
         {!remoteDesktopSession && (
           <>
             {remoteHosts.length > 0 ? (

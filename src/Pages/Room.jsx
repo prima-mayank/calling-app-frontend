@@ -9,12 +9,15 @@ import RoomFeeds from "../features/room/components/RoomFeeds";
 import RemoteDesktopPanel from "../features/remoteDesktop/components/RemoteDesktopPanel";
 import { useRemotePointerHandlers } from "../features/remoteDesktop/hooks/useRemotePointerHandlers";
 import { useRoomDerivedState } from "../features/room/hooks/useRoomDerivedState";
+import { useParticipantAudioState } from "../features/room/hooks/useParticipantAudioState";
+import { useConnectionQualityStatus } from "../features/room/hooks/useConnectionQualityStatus";
+import { useRoomRejoinRecovery } from "../features/room/hooks/useRoomRejoinRecovery";
 import { copyTextFallback, isInsecureContextOnLanIp } from "../features/room/utils/roomAccessHelpers";
+import {
+  consumeHomeJoinPreference,
+  saveQuickRejoinRoom,
+} from "../features/room/utils/roomSessionStorage";
 import { registerRemoteKeyboardControl } from "../features/remoteDesktop/utils/remoteKeyboardControl";
-import { isPeerReadyForCalls } from "../utils/peerCallUtils";
-
-const HOME_JOIN_PREF_KEY = "home_join_pref_v1";
-const HOME_JOIN_PREF_MAX_AGE_MS = 5 * 60 * 1000;
 
 const Room = () => {
   const { id } = useParams();
@@ -81,84 +84,54 @@ const Room = () => {
     async (mode) => {
       if (mode === "none") {
         setHasJoined(true);
-        return;
+        return { ok: true, reason: "" };
       }
 
       if (isInsecureContextOnLanIp()) {
         alert(
           "Camera/mic on local IP needs HTTPS. Use localhost on this machine or open the app via an HTTPS tunnel/domain."
         );
-        return;
+        return { ok: false, reason: "insecure" };
       }
 
       const media = await provideStream(mode === "video");
-      if (!media) return;
+      if (!media) {
+        return { ok: false, reason: "media" };
+      }
       setHasJoined(true);
+      return { ok: true, reason: "" };
     },
     [provideStream]
   );
 
   useEffect(() => {
     if (hasJoined) return;
-
-    let parsed = null;
-    try {
-      const raw = sessionStorage.getItem(HOME_JOIN_PREF_KEY);
-      if (raw) parsed = JSON.parse(raw);
-    } catch {
-      parsed = null;
-    }
-
-    if (!parsed || typeof parsed !== "object") return;
-
-    const mode = String(parsed.mode || "").trim();
-    const ts = Number(parsed.ts || 0);
-    const isFresh =
-      Number.isFinite(ts) && ts > 0 && Date.now() - ts <= HOME_JOIN_PREF_MAX_AGE_MS;
-
-    try {
-      sessionStorage.removeItem(HOME_JOIN_PREF_KEY);
-    } catch {
-      // noop
-    }
-
-    if (!isFresh) return;
-    if (mode !== "video" && mode !== "audio" && mode !== "none") return;
+    const mode = consumeHomeJoinPreference();
+    if (!mode) return;
 
     const autoJoin = async () => {
-      await joinRoomWithMode(mode);
+      const maxAttempts = mode === "none" ? 1 : 3;
+      const retryDelayMs = 650;
+
+      for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+        const result = await joinRoomWithMode(mode);
+        if (result?.ok) return;
+        if (result?.reason !== "media") return;
+        if (attempt === maxAttempts - 1) return;
+        await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs));
+      }
     };
 
     void autoJoin();
   }, [hasJoined, joinRoomWithMode]);
 
-  useEffect(() => {
-    // Join the Socket.IO room as early as possible so the room exists/has identity
-    // even before the user chooses audio/video/none. WebRTC calls will wait for stream.
-    const peerId = user?.id;
-    if (!peerId || !id) return;
-
-    const emitJoinRoom = () => {
-      socket.emit("joined-room", {
-        roomId: id,
-        peerId,
-      });
-
-      if (hasJoined && isPeerReadyForCalls(user)) {
-        socket.emit("ready");
-      }
-    };
-
-    if (socket.connected) {
-      emitJoinRoom();
-    }
-
-    socket.on("connect", emitJoinRoom);
-
-    return () => {
-      socket.off("connect", emitJoinRoom);
-    };
-  }, [hasJoined, id, socket, user, user?.id]);
+  useRoomRejoinRecovery({
+    socket,
+    roomId: id,
+    user,
+    hasJoined,
+    roomParticipants,
+  });
 
   useEffect(() => {
     const unsubscribe = subscribeRemoteDesktopFrame((frameDataUrl) => {
@@ -237,6 +210,12 @@ const Room = () => {
 
   const isControlActive =
     remoteInputActive && !!remoteDesktopSession && socketConnected && browserOnline;
+  const { isPeerMuted, togglePeerMuted } = useParticipantAudioState(peerIds);
+  const connectionQualityStatus = useConnectionQualityStatus({
+    browserOnline,
+    socketConnected,
+    getPeerConnections,
+  });
 
   const {
     handleRemoteMove,
@@ -314,6 +293,15 @@ const Room = () => {
     window.prompt("Copy this room link:", url);
   };
 
+  const handleEndCall = () => {
+    const rejoinMode = !stream ? "none" : hasVideoTrack ? "video" : "audio";
+    saveQuickRejoinRoom({
+      roomId: id,
+      mode: rejoinMode,
+    });
+    endCall(id);
+  };
+
   return (
     <div className="room-page">
       <LowNetworkWarning getPeerConnections={getPeerConnections} />
@@ -323,6 +311,7 @@ const Room = () => {
         participantCount={participantCount}
         socketConnected={socketConnected}
         browserOnline={browserOnline}
+        connectionQualityStatus={connectionQualityStatus}
       />
 
       <RoomToolbar
@@ -335,7 +324,7 @@ const Room = () => {
         toggleCamera={toggleCamera}
         startScreenShare={startScreenShare}
         stopScreenShare={stopScreenShare}
-        onEndCall={() => endCall(id)}
+        onEndCall={handleEndCall}
         shouldShowRemotePanel={shouldShowRemotePanel}
         setShowRemotePanel={setShowRemotePanel}
         onShareLink={handleShareLink}
@@ -399,6 +388,8 @@ const Room = () => {
         peers={peers}
         participantsWithoutMedia={participantsWithoutMedia}
         toggleZoom={toggleZoom}
+        isPeerMuted={isPeerMuted}
+        togglePeerMuted={togglePeerMuted}
       />
     </div>
   );

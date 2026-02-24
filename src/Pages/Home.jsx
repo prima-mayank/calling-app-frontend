@@ -1,22 +1,18 @@
-﻿
-import { useContext } from "react";
+import { useContext, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { SocketContext } from "../Context/socketContextValue";
-
-const HOME_JOIN_PREF_KEY = "home_join_pref_v1";
-
-const isLocalHostName = (hostname) => {
-  const value = String(hostname || "").trim().toLowerCase();
-  return value === "localhost" || value === "127.0.0.1" || value === "::1";
-};
-
-const isInsecureContextOnLanIp = () => {
-  if (typeof window === "undefined") return false;
-  if (window.isSecureContext) return false;
-  return !isLocalHostName(window.location?.hostname);
-};
+import { isInsecureContextOnLanIp } from "../features/room/utils/roomAccessHelpers";
+import {
+  clearHomeJoinPreference,
+  clearQuickRejoinRoom,
+  readQuickRejoinRoom,
+  saveHomeJoinPreference,
+} from "../features/room/utils/roomSessionStorage";
 
 const Home = () => {
+  const navigate = useNavigate();
   const { socket, provideStream, socketConnected } = useContext(SocketContext);
+  const [quickRejoin, setQuickRejoin] = useState(() => readQuickRejoinRoom());
 
   const startCall = async (isVideo) => {
     if (!socketConnected) {
@@ -25,21 +21,10 @@ const Home = () => {
     }
 
     const mode = isVideo ? "video" : "audio";
-    try {
-      sessionStorage.setItem(
-        HOME_JOIN_PREF_KEY,
-        JSON.stringify({ mode, ts: Date.now() })
-      );
-    } catch {
-      // noop
-    }
+    saveHomeJoinPreference(mode);
 
     if (isInsecureContextOnLanIp()) {
-      try {
-        sessionStorage.removeItem(HOME_JOIN_PREF_KEY);
-      } catch {
-        // noop
-      }
+      clearHomeJoinPreference();
       alert(
         "Camera/mic on local IP needs HTTPS. Use localhost on this machine or open the app via an HTTPS tunnel/domain."
       );
@@ -48,11 +33,7 @@ const Home = () => {
 
     const stream = await provideStream(isVideo);
     if (!stream) {
-      try {
-        sessionStorage.removeItem(HOME_JOIN_PREF_KEY);
-      } catch {
-        // noop
-      }
+      clearHomeJoinPreference();
       alert("Camera/mic unavailable or blocked. Allow permissions and retry.");
       return;
     }
@@ -60,16 +41,50 @@ const Home = () => {
     socket.emit("create-room");
   };
 
+  const quickRejoinCall = () => {
+    if (!quickRejoin?.roomId) return;
+
+    if (!socketConnected) {
+      alert("Backend is not connected yet. Check VITE_SOCKET_URL and retry.");
+      return;
+    }
+
+    saveHomeJoinPreference(quickRejoin.mode || "none");
+    clearQuickRejoinRoom();
+    setQuickRejoin(null);
+    navigate(`/room/${quickRejoin.roomId}`);
+  };
+
+  const dismissQuickRejoin = () => {
+    clearQuickRejoinRoom();
+    setQuickRejoin(null);
+  };
+
   return (
     <div className="home-page">
       <div className="home-shell panel">
         <h1 className="home-title">Calling Workspace</h1>
-        <p className="home-subtitle">
-          Start a video or audio room.
-        </p>
+        <p className="home-subtitle">Start a video or audio room.</p>
         <div className={`connection-pill ${socketConnected ? "connection-pill--online" : ""}`}>
           {socketConnected ? "Backend connected" : "Backend disconnected"}
         </div>
+
+        {quickRejoin?.roomId && (
+          <div className="home-quick-rejoin panel">
+            <div className="home-quick-rejoin-title">Call ended recently</div>
+            <div className="home-quick-rejoin-subtitle">
+              Rejoin room <strong>{quickRejoin.roomId}</strong> instantly.
+            </div>
+            <div className="home-quick-rejoin-actions">
+              <button onClick={quickRejoinCall} className="btn btn-primary">
+                Quick Rejoin
+              </button>
+              <button onClick={dismissQuickRejoin} className="btn btn-default">
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
 
         <div className="home-actions">
           <button
