@@ -14,6 +14,10 @@ const RoomFeeds = ({
   toggleZoom,
   isPeerMuted,
   togglePeerMuted,
+  registerVideoElement = () => {},
+  togglePictureInPicture = async () => ({ ok: false, reason: "unavailable" }),
+  isPictureInPictureSupported = () => false,
+  isPictureInPictureActive = () => false,
 }) => {
   const getPeerIdFromTile = (tileId = "") => {
     const normalizedTileId = String(tileId || "");
@@ -27,10 +31,20 @@ const RoomFeeds = ({
     return !!tile.muted || !!isPeerMuted(peerId);
   };
 
+  const tileHasVideo = (tile) => {
+    const tileStream = tile?.stream;
+    if (!tileStream || typeof tileStream.getVideoTracks !== "function") return false;
+    const videoTracks = tileStream.getVideoTracks();
+    if (!Array.isArray(videoTracks) || videoTracks.length === 0) return false;
+    return videoTracks.some((track) => track?.enabled);
+  };
+
   if (isVideoSpotlightActive) {
     const activePeerId = getPeerIdFromTile(activeVideoTile?.id);
     const showActiveMute = !!activePeerId;
     const activeMuted = getTileMutedState(activeVideoTile);
+    const activePiPId = String(activeVideoTile?.id || "").trim();
+    const showActivePiP = !!activePiPId && tileHasVideo(activeVideoTile);
 
     return (
       <div className="spotlight-layout">
@@ -40,6 +54,10 @@ const RoomFeeds = ({
             <ParticipantActions
               onZoom={() => setZoomTarget("")}
               zoomLabel="Unzoom"
+              showPip={showActivePiP}
+              pipActive={isPictureInPictureActive(activePiPId)}
+              pipSupported={isPictureInPictureSupported(activePiPId)}
+              onTogglePip={() => void togglePictureInPicture(activePiPId)}
               showMute={showActiveMute}
               isMuted={activeMuted}
               onToggleMute={() => togglePeerMuted(activePeerId)}
@@ -49,6 +67,8 @@ const RoomFeeds = ({
             stream={activeVideoTile.stream}
             muted={activeMuted}
             isLocal={activeVideoTile.isLocal}
+            videoElementId={activePiPId}
+            registerVideoElement={registerVideoElement}
           />
         </div>
 
@@ -59,6 +79,8 @@ const RoomFeeds = ({
               const peerId = getPeerIdFromTile(tile.id);
               const showMute = !!peerId;
               const isMuted = getTileMutedState(tile);
+              const tilePiPId = String(tile.id || "").trim();
+              const showPip = !!tilePiPId && tileHasVideo(tile);
 
               return (
                 <div key={tile.id} className="spotlight-tile">
@@ -67,12 +89,22 @@ const RoomFeeds = ({
                     <ParticipantActions
                       onZoom={() => setZoomTarget(tile.id)}
                       zoomLabel="Focus"
+                      showPip={showPip}
+                      pipActive={isPictureInPictureActive(tilePiPId)}
+                      pipSupported={isPictureInPictureSupported(tilePiPId)}
+                      onTogglePip={() => void togglePictureInPicture(tilePiPId)}
                       showMute={showMute}
                       isMuted={isMuted}
                       onToggleMute={() => togglePeerMuted(peerId)}
                     />
                   </div>
-                  <UserFeedPlayer stream={tile.stream} muted={isMuted} isLocal={tile.isLocal} />
+                  <UserFeedPlayer
+                    stream={tile.stream}
+                    muted={isMuted}
+                    isLocal={tile.isLocal}
+                    videoElementId={tilePiPId}
+                    registerVideoElement={registerVideoElement}
+                  />
                 </div>
               );
             })}
@@ -91,9 +123,19 @@ const RoomFeeds = ({
           <ParticipantActions
             onZoom={() => toggleZoom("local")}
             zoomLabel="Zoom"
+            showPip={!!stream && !!hasVideoTrack}
+            pipActive={isPictureInPictureActive("local")}
+            pipSupported={isPictureInPictureSupported("local")}
+            onTogglePip={() => void togglePictureInPicture("local")}
           />
         </div>
-        <UserFeedPlayer stream={stream} muted={true} isLocal />
+        <UserFeedPlayer
+          stream={stream}
+          muted={true}
+          isLocal
+          videoElementId="local"
+          registerVideoElement={registerVideoElement}
+        />
       </div>
 
       <div className="feed-section">
@@ -103,21 +145,39 @@ const RoomFeeds = ({
             <div className="muted-text">No other participants</div>
           )}
 
-          {peerIds.map((peerId) => (
-            <div key={peerId} className="participant-card">
-              <div className="participant-card-header">
-                <div className="participant-name">{peerId}</div>
-                <ParticipantActions
-                  onZoom={() => toggleZoom(`peer:${peerId}`)}
-                  zoomLabel="Zoom"
-                  showMute={true}
-                  isMuted={isPeerMuted(peerId)}
-                  onToggleMute={() => togglePeerMuted(peerId)}
+          {peerIds.map((peerId) => {
+            const peerPiPId = `peer:${peerId}`;
+            const peerStream = peers[peerId]?.stream || null;
+            const peerHasVideo =
+              !!peerStream &&
+              typeof peerStream.getVideoTracks === "function" &&
+              peerStream.getVideoTracks().some((track) => track?.enabled);
+
+            return (
+              <div key={peerId} className="participant-card">
+                <div className="participant-card-header">
+                  <div className="participant-name">{peerId}</div>
+                  <ParticipantActions
+                    onZoom={() => toggleZoom(peerPiPId)}
+                    zoomLabel="Zoom"
+                    showPip={peerHasVideo}
+                    pipActive={isPictureInPictureActive(peerPiPId)}
+                    pipSupported={isPictureInPictureSupported(peerPiPId)}
+                    onTogglePip={() => void togglePictureInPicture(peerPiPId)}
+                    showMute={true}
+                    isMuted={isPeerMuted(peerId)}
+                    onToggleMute={() => togglePeerMuted(peerId)}
+                  />
+                </div>
+                <UserFeedPlayer
+                  stream={peerStream}
+                  muted={isPeerMuted(peerId)}
+                  videoElementId={peerPiPId}
+                  registerVideoElement={registerVideoElement}
                 />
               </div>
-              <UserFeedPlayer stream={peers[peerId].stream} muted={isPeerMuted(peerId)} />
-            </div>
-          ))}
+            );
+          })}
 
           {participantsWithoutMedia.map((participantId) => (
             <div key={`nomedia:${participantId}`} className="participant-card">

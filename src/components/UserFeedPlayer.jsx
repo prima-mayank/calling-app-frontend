@@ -1,7 +1,24 @@
 import { useEffect, useRef } from "react";
 
-const UserFeedPlayer = ({ stream, muted = false, isLocal = false }) => {
+const UserFeedPlayer = ({
+  stream,
+  muted = false,
+  isLocal = false,
+  videoElementId = "",
+  registerVideoElement = null,
+}) => {
   const videoRef = useRef(null);
+
+  useEffect(() => {
+    if (typeof registerVideoElement !== "function") return;
+    const normalizedVideoElementId = String(videoElementId || "").trim();
+    if (!normalizedVideoElementId) return;
+
+    registerVideoElement(normalizedVideoElementId, videoRef.current);
+    return () => {
+      registerVideoElement(normalizedVideoElementId, null);
+    };
+  }, [registerVideoElement, videoElementId]);
 
   useEffect(() => {
     const el = videoRef.current;

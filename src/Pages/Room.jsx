@@ -10,6 +10,7 @@ import RemoteDesktopPanel from "../features/remoteDesktop/components/RemoteDeskt
 import { useRemotePointerHandlers } from "../features/remoteDesktop/hooks/useRemotePointerHandlers";
 import { useRoomDerivedState } from "../features/room/hooks/useRoomDerivedState";
 import { useParticipantAudioState } from "../features/room/hooks/useParticipantAudioState";
+import { usePictureInPictureController } from "../features/room/hooks/usePictureInPictureController";
 import { useConnectionQualityStatus } from "../features/room/hooks/useConnectionQualityStatus";
 import { useRoomRejoinRecovery } from "../features/room/hooks/useRoomRejoinRecovery";
 import { copyTextFallback, isInsecureContextOnLanIp } from "../features/room/utils/roomAccessHelpers";
@@ -211,6 +212,12 @@ const Room = () => {
   const isControlActive =
     remoteInputActive && !!remoteDesktopSession && socketConnected && browserOnline;
   const { isPeerMuted, togglePeerMuted } = useParticipantAudioState(peerIds);
+  const {
+    registerVideoElement,
+    isPictureInPictureSupported,
+    isPictureInPictureActive,
+    togglePictureInPicture,
+  } = usePictureInPictureController();
   const connectionQualityStatus = useConnectionQualityStatus({
     browserOnline,
     socketConnected,
@@ -390,6 +397,10 @@ const Room = () => {
         toggleZoom={toggleZoom}
         isPeerMuted={isPeerMuted}
         togglePeerMuted={togglePeerMuted}
+        registerVideoElement={registerVideoElement}
+        togglePictureInPicture={togglePictureInPicture}
+        isPictureInPictureSupported={isPictureInPictureSupported}
+        isPictureInPictureActive={isPictureInPictureActive}
       />
     </div>
   );
