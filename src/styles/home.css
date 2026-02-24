@@ -9,8 +9,14 @@
 
 .home-shell,
 .room-join-shell {
-  width: min(880px, 100%);
+  width: min(900px, 100%);
   padding: clamp(22px, 4vw, 40px);
+}
+
+.home-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
 }
 
 .home-title {
@@ -26,7 +32,7 @@
 }
 
 .connection-pill {
-  margin-top: 16px;
+  margin-top: 8px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -50,9 +56,55 @@
   background: var(--success-0);
 }
 
+.home-account-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.home-account-label {
+  color: var(--text-1);
+  font-size: 0.9rem;
+}
+
+.home-account-btn {
+  text-decoration: none;
+}
+
+.home-section {
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: linear-gradient(180deg, rgba(20, 35, 54, 0.75), rgba(14, 26, 42, 0.7));
+  border: 1px solid rgba(143, 180, 236, 0.24);
+}
+
+.home-section-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.home-section-title {
+  font-size: 1.1rem;
+}
+
+.home-section-subtitle {
+  color: var(--text-2);
+  font-size: 0.9rem;
+}
+
+.home-guest-actions {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .home-actions,
 .room-join-actions {
-  margin-top: 24px;
+  margin-top: 16px;
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
@@ -62,8 +114,128 @@
   min-height: 54px;
 }
 
+.home-directory-head {
+  margin-top: 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+}
+
+.home-directory-count {
+  color: var(--text-2);
+  font-size: 0.88rem;
+}
+
+.home-directory-list {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-user-row {
+  border: 1px solid rgba(146, 180, 225, 0.24);
+  border-radius: var(--radius-sm);
+  padding: 10px;
+  background: rgba(16, 30, 46, 0.68);
+  display: grid;
+  grid-template-columns: minmax(160px, 1.4fr) auto auto;
+  gap: 10px;
+  align-items: center;
+}
+
+.home-user-meta {
+  min-width: 0;
+}
+
+.home-user-name {
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-user-email {
+  margin-top: 2px;
+  font-size: 0.82rem;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.home-user-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-1);
+  font-size: 0.84rem;
+}
+
+.presence-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--danger-0);
+}
+
+.presence-dot--online {
+  background: var(--success-0);
+}
+
+.presence-dot--offline {
+  background: var(--danger-0);
+}
+
+.home-user-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.home-user-actions .btn {
+  min-width: 76px;
+}
+
+.home-direct-call-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.home-call-notice {
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: rgba(20, 35, 54, 0.7);
+  border: 1px solid rgba(146, 180, 225, 0.24);
+  color: var(--text-1);
+}
+
+.home-call-panel {
+  padding: 12px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(147, 198, 255, 0.3);
+  background: linear-gradient(180deg, rgba(20, 39, 58, 0.76), rgba(15, 31, 49, 0.7));
+}
+
+.home-call-panel-title {
+  font-weight: 700;
+}
+
+.home-call-panel-subtitle {
+  margin-top: 4px;
+  color: var(--text-2);
+  font-size: 0.88rem;
+}
+
+.home-call-panel-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 8px;
+}
+
 .home-quick-rejoin {
-  margin-top: 16px;
+  margin-top: 4px;
   padding: 14px;
   border-radius: var(--radius-md);
   background: linear-gradient(180deg, rgba(22, 38, 60, 0.8), rgba(18, 31, 49, 0.72));
@@ -106,5 +278,19 @@
 
   .btn-join--wide {
     grid-column: auto;
+  }
+
+  .home-user-row {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+
+  .home-user-actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .home-user-actions .btn {
+    flex: 1 1 120px;
   }
 }

@@ -7,9 +7,27 @@ import {
   SOCKET_RECONNECT_DELAY_MS,
   WS_SERVER,
 } from "../config/runtimeConfig";
+import { readAuthSession } from "../features/auth/utils/authStorage";
+
+const resolveSocketAuthPayload = () => {
+  const payload = {};
+
+  if (REMOTE_CONTROL_TOKEN) {
+    payload.token = REMOTE_CONTROL_TOKEN;
+  }
+
+  const authSession = readAuthSession();
+  if (authSession?.token) {
+    payload.accessToken = authSession.token;
+  }
+
+  return Object.keys(payload).length > 0 ? payload : undefined;
+};
 
 export const socket = SocketIoClient(WS_SERVER, {
-  auth: REMOTE_CONTROL_TOKEN ? { token: REMOTE_CONTROL_TOKEN } : undefined,
+  auth: (cb) => {
+    cb(resolveSocketAuthPayload());
+  },
   withCredentials: false,
   // Keep polling enabled so signaling still works when WebSocket upgrade is blocked.
   // In local dev, WebSocket upgrade is disabled by default to avoid noisy probe failures
@@ -24,3 +42,12 @@ export const socket = SocketIoClient(WS_SERVER, {
   reconnectionDelayMax: SOCKET_RECONNECT_DELAY_MAX_MS,
   randomizationFactor: 0.4,
 });
+
+export const refreshSocketAuthSession = () => {
+  if (typeof socket.disconnect === "function" && socket.connected) {
+    socket.disconnect();
+  }
+  if (typeof socket.connect === "function") {
+    socket.connect();
+  }
+};

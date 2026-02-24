@@ -1,6 +1,7 @@
-import { useContext, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { SocketContext } from "../Context/socketContextValue";
+import { WS_SERVER } from "../config/runtimeConfig";
 import { isInsecureContextOnLanIp } from "../features/room/utils/roomAccessHelpers";
 import {
   clearHomeJoinPreference,
@@ -8,15 +9,87 @@ import {
   readQuickRejoinRoom,
   saveHomeJoinPreference,
 } from "../features/room/utils/roomSessionStorage";
+import { refreshSocketAuthSession } from "../services/socketClient";
+import { useAuthSessionState } from "../features/auth/hooks/useAuthSessionState";
+import { useUserDirectory } from "../features/home/hooks/useUserDirectory";
+import { useDirectCallFlow } from "../features/home/hooks/useDirectCallFlow";
+import HomeGuestSection from "../features/home/components/HomeGuestSection";
+import HomeMeetSection from "../features/home/components/HomeMeetSection";
+import HomeUserDirectorySection from "../features/home/components/HomeUserDirectorySection";
+import HomeDirectCallPanel from "../features/home/components/HomeDirectCallPanel";
 
 const Home = () => {
   const navigate = useNavigate();
-  const { socket, provideStream, socketConnected } = useContext(SocketContext);
+  const { socket, provideStream, socketConnected, socketConnectError } =
+    useContext(SocketContext);
   const [quickRejoin, setQuickRejoin] = useState(() => readQuickRejoinRoom());
+  const { session, isCheckingSession, logout } = useAuthSessionState();
+  const authToken = String(session?.token || "").trim();
+  const isLoggedIn = !!authToken && !!session?.user;
+  const isDirectCallEnabled = isLoggedIn && socketConnected;
+
+  const {
+    users,
+    isLoadingUsers,
+    usersError,
+    refreshUsers,
+  } = useUserDirectory({
+    socket,
+    token: authToken,
+    isEnabled: isLoggedIn,
+  });
+
+  const {
+    incomingCall,
+    outgoingCall,
+    directCallNotice,
+    startDirectCall,
+    cancelOutgoingCall,
+    acceptIncomingCall,
+    rejectIncomingCall,
+    resetDirectCallState,
+  } = useDirectCallFlow({
+    socket,
+    isEnabled: isDirectCallEnabled,
+  });
+
+  const currentUserLabel = useMemo(() => {
+    if (!session?.user) return "";
+    return session.user.displayName || session.user.email || "";
+  }, [session?.user]);
+
+  const ensureSocketConnection = async () => {
+    if (socketConnected || socket.connected) return true;
+
+    try {
+      socket.connect();
+    } catch {
+      // noop
+    }
+
+    const timeoutMs = 2600;
+    const stepMs = 120;
+    const startedAt = Date.now();
+
+    while (Date.now() - startedAt < timeoutMs) {
+      if (socket.connected) return true;
+      await new Promise((resolve) => window.setTimeout(resolve, stepMs));
+    }
+
+    return socket.connected;
+  };
+
+  const showSocketDisconnectedAlert = () => {
+    const reason = String(socketConnectError || "").trim() || "socket unavailable";
+    alert(
+      `Backend is not connected yet.\nReason: ${reason}\nSocket URL: ${WS_SERVER}\nCheck backend and env, then retry.`
+    );
+  };
 
   const startCall = async (isVideo) => {
-    if (!socketConnected) {
-      alert("Backend is not connected yet. Check VITE_SOCKET_URL and retry.");
+    const socketReady = await ensureSocketConnection();
+    if (!socketReady) {
+      showSocketDisconnectedAlert();
       return;
     }
 
@@ -44,8 +117,8 @@ const Home = () => {
   const quickRejoinCall = () => {
     if (!quickRejoin?.roomId) return;
 
-    if (!socketConnected) {
-      alert("Backend is not connected yet. Check VITE_SOCKET_URL and retry.");
+    if (!socketConnected && !socket.connected) {
+      showSocketDisconnectedAlert();
       return;
     }
 
@@ -60,14 +133,85 @@ const Home = () => {
     setQuickRejoin(null);
   };
 
+  const onLogout = () => {
+    logout();
+    resetDirectCallState();
+    refreshSocketAuthSession();
+  };
+
+  const callUserAudio = (user) => {
+    startDirectCall({
+      targetUserId: user?.id,
+      mode: "audio",
+    });
+  };
+
+  const callUserVideo = (user) => {
+    startDirectCall({
+      targetUserId: user?.id,
+      mode: "video",
+    });
+  };
+
   return (
     <div className="home-page">
       <div className="home-shell panel">
         <h1 className="home-title">Calling Workspace</h1>
-        <p className="home-subtitle">Start a video or audio room.</p>
+        <p className="home-subtitle">
+          Direct calls for logged-in users, and instant meet links for everyone.
+        </p>
+
+        <div className="home-account-row">
+          {isCheckingSession ? (
+            <span className="home-account-label">Checking session...</span>
+          ) : isLoggedIn ? (
+            <>
+              <span className="home-account-label">
+                Signed in as <strong>{currentUserLabel}</strong>
+              </span>
+              <button className="btn btn-default home-account-btn" onClick={onLogout}>
+                Logout
+              </button>
+            </>
+          ) : (
+            <span className="home-account-label">No active account session</span>
+          )}
+        </div>
+
         <div className={`connection-pill ${socketConnected ? "connection-pill--online" : ""}`}>
           {socketConnected ? "Backend connected" : "Backend disconnected"}
         </div>
+
+        {(isLoggedIn || incomingCall || outgoingCall || directCallNotice) && (
+          <HomeDirectCallPanel
+            incomingCall={incomingCall}
+            outgoingCall={outgoingCall}
+            directCallNotice={directCallNotice}
+            onAcceptIncoming={acceptIncomingCall}
+            onRejectIncoming={rejectIncomingCall}
+            onCancelOutgoing={cancelOutgoingCall}
+          />
+        )}
+
+        {isLoggedIn ? (
+          <HomeUserDirectorySection
+            users={users}
+            isLoadingUsers={isLoadingUsers}
+            usersError={usersError}
+            onRefresh={refreshUsers}
+            onCallAudio={callUserAudio}
+            onCallVideo={callUserVideo}
+            outgoingCall={outgoingCall}
+            canCall={socketConnected}
+          />
+        ) : (
+          <HomeGuestSection />
+        )}
+
+        <HomeMeetSection
+          onStartVideoMeet={() => startCall(true)}
+          onStartAudioMeet={() => startCall(false)}
+        />
 
         {quickRejoin?.roomId && (
           <div className="home-quick-rejoin panel">
@@ -85,22 +229,6 @@ const Home = () => {
             </div>
           </div>
         )}
-
-        <div className="home-actions">
-          <button
-            onClick={() => startCall(true)}
-            className="btn btn-call-video home-action-btn"
-          >
-            Start Video Call
-          </button>
-
-          <button
-            onClick={() => startCall(false)}
-            className="btn btn-call-audio home-action-btn"
-          >
-            Start Audio Call
-          </button>
-        </div>
       </div>
     </div>
   );

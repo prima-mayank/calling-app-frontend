@@ -64,6 +64,7 @@ export const SocketProvider = ({ children }) => {
   const [remoteDesktopError, setRemoteDesktopError] = useState("");
   const [hostAppInstallPrompt, setHostAppInstallPrompt] = useState(null);
   const [socketConnected, setSocketConnected] = useState(socket.connected);
+  const [socketConnectError, setSocketConnectError] = useState("");
   const [browserOnline, setBrowserOnline] = useState(
     typeof navigator === "undefined" ? true : navigator.onLine !== false
   );
@@ -241,11 +242,16 @@ export const SocketProvider = ({ children }) => {
   useEffect(() => {
     const onConnect = () => {
       setSocketConnected(true);
+      setSocketConnectError("");
       refreshRemoteHosts();
       reconnectPeerIfNeeded();
     };
     const onDisconnect = () => setSocketConnected(false);
-    const onConnectError = () => setSocketConnected(false);
+    const onConnectError = (error) => {
+      setSocketConnected(false);
+      const message = String(error?.message || "").trim();
+      setSocketConnectError(message || "connect-error");
+    };
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -671,6 +677,7 @@ export const SocketProvider = ({ children }) => {
         remoteDesktopError,
         hostAppInstallPrompt,
         socketConnected,
+        socketConnectError,
         browserOnline,
         provideStream,
         toggleMic,
