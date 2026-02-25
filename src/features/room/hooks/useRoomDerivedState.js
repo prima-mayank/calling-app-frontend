@@ -4,6 +4,7 @@ export const useRoomDerivedState = ({
   stream,
   peers,
   roomParticipants,
+  roomParticipantProfiles = {},
   userId,
   isScreenSharing,
   remoteDesktopSession,
@@ -91,9 +92,16 @@ export const useRoomDerivedState = ({
         hostOwnershipTotals[ownership] > 1 ? ` ${hostOwnershipSeen[ownership]}` : "";
       const busySuffix = host?.busy ? " (busy)" : "";
 
+      // if the server supplied a more descriptive label (name/email/peerId) use it
+      const displayName = String(host.label || "").trim();
+      const computed = `${baseLabel}${duplicateSuffix}${busySuffix}`.trim();
+      const finalLabel = displayName
+        ? `${displayName} (${computed})`
+        : computed;
+
       return {
         value: host.hostId,
-        label: `${baseLabel}${duplicateSuffix}${busySuffix}`,
+        label: finalLabel,
       };
     });
 
@@ -106,6 +114,18 @@ export const useRoomDerivedState = ({
     const participantsWithoutMedia = otherParticipants.filter(
       (participantId) => !peers[participantId]
     );
+
+    const getLabelForPeer = (peerId) => {
+      if (!peerId) return "";
+      const profile = roomParticipantProfiles?.[peerId] || {};
+      const displayName = String(profile.displayName || "").trim();
+      const email = String(profile.email || "").trim().toLowerCase();
+      const labelFromProfile = String(profile.label || "").trim();
+      return (
+        labelFromProfile || displayName || email || peerId
+      );
+    };
+
 
     const localParticipantBase = userId ? 1 : 0;
     const participantCount = Math.max(
@@ -131,7 +151,7 @@ export const useRoomDerivedState = ({
       },
       ...peerIds.map((peerId) => ({
         id: `peer:${peerId}`,
-        label: peerId,
+        label: getLabelForPeer(peerId),
         stream: peers[peerId].stream,
         muted: false,
         isLocal: false,
@@ -175,6 +195,7 @@ export const useRoomDerivedState = ({
     remoteDesktopSession,
     remoteHosts,
     roomParticipants,
+    roomParticipantProfiles,
     selectedRemoteHostId,
     selectedSetupPeerId,
     showRemotePanel,

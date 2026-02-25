@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { AuthShell } from "../components/AuthShell";
 import { signupWithPassword } from "../services/authApi";
@@ -14,17 +14,9 @@ const SignupPage = () => {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  const canSubmit = useMemo(() => {
-    return (
-      String(displayName || "").trim().length > 0 &&
-      String(email || "").trim().length > 0 &&
-      String(password || "").length > 0
-    );
-  }, [displayName, email, password]);
-
   const onSubmit = async (event) => {
     event.preventDefault();
-    if (!canSubmit || isSubmitting) return;
+    if (isSubmitting) return;
 
     setIsSubmitting(true);
     setError("");
@@ -44,6 +36,31 @@ const SignupPage = () => {
       setSuccess("Account created. Redirecting...");
       window.setTimeout(() => navigate("/"), 250);
     } catch (submitError) {
+      const errorCode = String(submitError?.code || "").trim();
+      if (errorCode === "auth-unavailable") {
+        const normalizedEmail = String(email || "").trim().toLowerCase();
+        const fallbackEmail = normalizedEmail || `tester-${Date.now()}@local.test`;
+        const fallbackDisplayName =
+          String(displayName || "").trim() ||
+          String(fallbackEmail.split("@")[0] || "").trim() ||
+          "Local Tester";
+        const fallbackUserId =
+          fallbackEmail.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "") ||
+          `user-${Date.now()}`;
+
+        saveAuthSession({
+          token: `local-test-${Date.now()}`,
+          user: {
+            id: fallbackUserId,
+            email: fallbackEmail,
+            displayName: fallbackDisplayName,
+          },
+        });
+        refreshSocketAuthSession();
+        setSuccess("Auth disabled on server. Local test session started.");
+        window.setTimeout(() => navigate("/"), 250);
+        return;
+      }
       setError(String(submitError?.message || "Signup failed.").trim());
     } finally {
       setIsSubmitting(false);
@@ -73,8 +90,6 @@ const SignupPage = () => {
             onChange={(event) => setDisplayName(event.target.value)}
             placeholder="Your name"
             className="form-input auth-input"
-            required
-            maxLength={64}
           />
         </label>
 
@@ -87,7 +102,6 @@ const SignupPage = () => {
             onChange={(event) => setEmail(event.target.value)}
             placeholder="Email or test id"
             className="form-input auth-input"
-            required
           />
         </label>
 
@@ -100,7 +114,6 @@ const SignupPage = () => {
             onChange={(event) => setPassword(event.target.value)}
             placeholder="Password"
             className="form-input auth-input"
-            required
           />
         </label>
 
@@ -108,7 +121,7 @@ const SignupPage = () => {
         {success ? <div className="auth-success-text">{success}</div> : null}
 
         <div className="auth-actions">
-          <button type="submit" className="btn btn-primary" disabled={!canSubmit || isSubmitting}>
+          <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
             {isSubmitting ? "Creating..." : "Create Account"}
           </button>
           <button type="button" className="btn btn-default" onClick={() => navigate("/")}>

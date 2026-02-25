@@ -10,6 +10,7 @@ const RoomFeeds = ({
   hasVideoTrack,
   peerIds,
   peers,
+  roomParticipantProfiles = {},
   participantsWithoutMedia,
   toggleZoom,
   isPeerMuted,
@@ -156,7 +157,7 @@ const RoomFeeds = ({
             return (
               <div key={peerId} className="participant-card">
                 <div className="participant-card-header">
-                  <div className="participant-name">{peerId}</div>
+                  <div className="participant-name">{roomParticipantProfiles[peerId]?.label || peerId}</div>
                   <ParticipantActions
                     onZoom={() => toggleZoom(peerPiPId)}
                     zoomLabel="Zoom"
@@ -182,7 +183,9 @@ const RoomFeeds = ({
           {participantsWithoutMedia.map((participantId) => (
             <div key={`nomedia:${participantId}`} className="participant-card">
               <div className="participant-card-header">
-                <div className="participant-name">{participantId}</div>
+                <div className="participant-name">
+                  {roomParticipantProfiles[participantId]?.label || participantId}
+                </div>
               </div>
               <div className="muted-text">Joined without media</div>
             </div>

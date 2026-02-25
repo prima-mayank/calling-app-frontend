@@ -13,6 +13,7 @@ export const usePeerCallManager = ({
   pendingParticipantsRef,
   dispatch,
   setRoomParticipants,
+  setRoomParticipantProfiles,
 }) => {
   const getPeerConnections = useCallback(() => {
     return Object.values(callsRef.current)
@@ -139,12 +140,27 @@ export const usePeerCallManager = ({
     return true;
   }, [addPendingParticipants, pendingParticipantsRef, startCallToParticipant, streamRef, userRef]);
 
-  const fetchParticipantList = useCallback(({ participants }) => {
+  const fetchParticipantList = useCallback(({ participants, participantProfiles }) => {
     const uniqueParticipants = Array.isArray(participants)
       ? [...new Set(participants.map((item) => String(item || "").trim()).filter(Boolean))]
       : [];
+    const normalizedParticipantProfiles = uniqueParticipants.reduce((acc, participantId) => {
+      const profile = participantProfiles?.[participantId] || {};
+      const displayName = String(profile?.displayName || "").trim();
+      const email = String(profile?.email || "").trim().toLowerCase();
+      const label =
+        String(profile?.label || "").trim() || displayName || email || participantId;
+
+      acc[participantId] = {
+        displayName,
+        email,
+        label,
+      };
+      return acc;
+    }, {});
 
     setRoomParticipants(uniqueParticipants);
+    setRoomParticipantProfiles(normalizedParticipantProfiles);
     const participantSet = new Set(uniqueParticipants);
 
     Object.keys(callsRef.current).forEach((existingPeerId) => {
@@ -175,7 +191,16 @@ export const usePeerCallManager = ({
         addPendingParticipants([participantId]);
       }
     });
-  }, [addPendingParticipants, callsRef, dispatch, setRoomParticipants, startCallToParticipant, streamRef, userRef]);
+  }, [
+    addPendingParticipants,
+    callsRef,
+    dispatch,
+    setRoomParticipantProfiles,
+    setRoomParticipants,
+    startCallToParticipant,
+    streamRef,
+    userRef,
+  ]);
 
   return {
     getPeerConnections,

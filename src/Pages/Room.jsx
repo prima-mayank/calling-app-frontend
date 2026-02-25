@@ -15,7 +15,11 @@ import { useConnectionQualityStatus } from "../features/room/hooks/useConnection
 import { useRoomRejoinRecovery } from "../features/room/hooks/useRoomRejoinRecovery";
 import { copyTextFallback, isInsecureContextOnLanIp } from "../features/room/utils/roomAccessHelpers";
 import {
-  consumeHomeJoinPreference,
+  clearActiveRoomSession,
+  clearHomeJoinPreference,
+  readActiveRoomSessionModeForRoom,
+  readHomeJoinPreference,
+  saveActiveRoomSession,
   saveQuickRejoinRoom,
 } from "../features/room/utils/roomSessionStorage";
 import { registerRemoteKeyboardControl } from "../features/remoteDesktop/utils/remoteKeyboardControl";
@@ -34,6 +38,7 @@ const Room = () => {
     remoteDesktopPendingRequest,
     remoteHosts,
     roomParticipants,
+    roomParticipantProfiles,
     incomingRemoteDesktopRequest,
     incomingRemoteHostSetupRequest,
     remoteHostSetupPending,
@@ -61,12 +66,18 @@ const Room = () => {
     endCall,
   } = useContext(SocketContext);
 
+  const initialResumeJoinMode =
+    readActiveRoomSessionModeForRoom(id) || readHomeJoinPreference();
+
   const [hasJoined, setHasJoined] = useState(false);
+  const [resumeJoinMode, setResumeJoinMode] = useState(initialResumeJoinMode);
+  const [isAutoJoining, setIsAutoJoining] = useState(!!initialResumeJoinMode);
   const [remoteInputActive, setRemoteInputActive] = useState(false);
   const [showRemotePanel, setShowRemotePanel] = useState(false);
   const [zoomTarget, setZoomTarget] = useState("");
   const [selectedRemoteHostId, setSelectedRemoteHostId] = useState("");
   const [selectedSetupPeerId, setSelectedSetupPeerId] = useState("");
+  const autoJoinAttemptedRef = useRef(false);
   const moveThrottleRef = useRef(0);
   const remoteSurfaceRef = useRef(null);
   const remoteFrameRef = useRef(null);
@@ -85,6 +96,7 @@ const Room = () => {
     async (mode) => {
       if (mode === "none") {
         setHasJoined(true);
+        saveActiveRoomSession({ roomId: id, mode: "none" });
         return { ok: true, reason: "" };
       }
 
@@ -100,31 +112,51 @@ const Room = () => {
         return { ok: false, reason: "media" };
       }
       setHasJoined(true);
+      saveActiveRoomSession({ roomId: id, mode });
       return { ok: true, reason: "" };
     },
-    [provideStream]
+    [id, provideStream]
   );
 
   useEffect(() => {
     if (hasJoined) return;
-    const mode = consumeHomeJoinPreference();
+    if (autoJoinAttemptedRef.current) return;
+    const mode = String(resumeJoinMode || "").trim();
     if (!mode) return;
+    autoJoinAttemptedRef.current = true;
 
     const autoJoin = async () => {
+      setIsAutoJoining(true);
+      clearHomeJoinPreference();
       const maxAttempts = mode === "none" ? 1 : 3;
       const retryDelayMs = 650;
 
       for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
         const result = await joinRoomWithMode(mode);
-        if (result?.ok) return;
-        if (result?.reason !== "media") return;
-        if (attempt === maxAttempts - 1) return;
+        if (result?.ok) {
+          setIsAutoJoining(false);
+          setResumeJoinMode("");
+          return;
+        }
+        if (result?.reason !== "media") {
+          setIsAutoJoining(false);
+          setResumeJoinMode("");
+          return;
+        }
+        if (attempt === maxAttempts - 1) {
+          setIsAutoJoining(false);
+          setResumeJoinMode("");
+          return;
+        }
         await new Promise((resolve) => window.setTimeout(resolve, retryDelayMs));
       }
+
+      setIsAutoJoining(false);
+      setResumeJoinMode("");
     };
 
     void autoJoin();
-  }, [hasJoined, joinRoomWithMode]);
+  }, [hasJoined, joinRoomWithMode, resumeJoinMode]);
 
   useRoomRejoinRecovery({
     socket,
@@ -194,6 +226,7 @@ const Room = () => {
     stream,
     peers,
     roomParticipants,
+    roomParticipantProfiles,
     userId: user?.id,
     isScreenSharing,
     remoteDesktopSession,
@@ -252,6 +285,7 @@ const Room = () => {
         roomId={id}
         joinRoomWithMode={joinRoomWithMode}
         getPeerConnections={getPeerConnections}
+        isAutoJoining={isAutoJoining}
       />
     );
   }
@@ -302,6 +336,7 @@ const Room = () => {
 
   const handleEndCall = () => {
     const rejoinMode = !stream ? "none" : hasVideoTrack ? "video" : "audio";
+    clearActiveRoomSession();
     saveQuickRejoinRoom({
       roomId: id,
       mode: rejoinMode,
@@ -393,6 +428,7 @@ const Room = () => {
         hasVideoTrack={hasVideoTrack}
         peerIds={peerIds}
         peers={peers}
+        roomParticipantProfiles={roomParticipantProfiles}
         participantsWithoutMedia={participantsWithoutMedia}
         toggleZoom={toggleZoom}
         isPeerMuted={isPeerMuted}

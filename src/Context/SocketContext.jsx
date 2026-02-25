@@ -53,6 +53,7 @@ export const SocketProvider = ({ children }) => {
   const [remoteDesktopPendingRequest, setRemoteDesktopPendingRequest] = useState(null);
   const [remoteHosts, setRemoteHosts] = useState([]);
   const [roomParticipants, setRoomParticipants] = useState([]);
+  const [roomParticipantProfiles, setRoomParticipantProfiles] = useState({});
   const [claimedRemoteHostId, setClaimedRemoteHostId] = useState("");
   const [incomingRemoteDesktopRequest, setIncomingRemoteDesktopRequest] = useState(null);
   const [incomingRemoteHostSetupRequest, setIncomingRemoteHostSetupRequest] = useState(null);
@@ -130,6 +131,7 @@ export const SocketProvider = ({ children }) => {
     pendingParticipantsRef,
     dispatch,
     setRoomParticipants,
+    setRoomParticipantProfiles,
   });
 
   useEffect(() => {
@@ -464,6 +466,7 @@ export const SocketProvider = ({ children }) => {
       dispatch,
       removePeerAction,
       setRoomParticipants,
+      setRoomParticipantProfiles,
       remoteDesktopPendingRequestRef,
       setRemoteDesktopPendingRequest,
       setRemoteDesktopError,
@@ -512,11 +515,31 @@ export const SocketProvider = ({ children }) => {
       setupCallHandlers(call, call.peer);
     });
 
-    const onUserJoined = ({ peerId }) => {
+    const onUserJoined = ({ peerId, participantProfile }) => {
       if (!peerId || peerId === user.id) return;
       setRoomParticipants((prev) =>
         prev.includes(peerId) ? prev : [...prev, peerId]
       );
+
+      const profile = participantProfile || {};
+      const normalizedDisplayName = String(profile.displayName || "").trim();
+      const normalizedEmail = String(profile.email || "").trim().toLowerCase();
+      const normalizedLabel =
+        String(profile.label || "").trim() ||
+        normalizedDisplayName ||
+        normalizedEmail ||
+        String(peerId || "").trim();
+      if (normalizedLabel) {
+        setRoomParticipantProfiles((prev) => ({
+          ...prev,
+          [peerId]: {
+            displayName: normalizedDisplayName,
+            email: normalizedEmail,
+            label: normalizedLabel,
+          },
+        }));
+      }
+
       if (!isPeerReadyForCalls(user)) {
         addPendingParticipants([peerId]);
         return;
@@ -628,6 +651,7 @@ export const SocketProvider = ({ children }) => {
     setRemoteDesktopError("");
     setIsScreenSharing(false);
     setRoomParticipants([]);
+    setRoomParticipantProfiles({});
 
     if (screenShareTrackRef.current) {
       try {
@@ -668,6 +692,7 @@ export const SocketProvider = ({ children }) => {
         remoteDesktopPendingRequest,
         remoteHosts,
         roomParticipants,
+        roomParticipantProfiles,
         claimedRemoteHostId,
         incomingRemoteDesktopRequest,
         incomingRemoteHostSetupRequest,

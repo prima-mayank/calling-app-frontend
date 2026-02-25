@@ -75,9 +75,9 @@ const RemoteDesktopPanel = ({
                 >
                   <option value="">Select Host</option>
                   {hostSelectOptions.map((hostOption) => (
-                    <option key={hostOption.value} value={hostOption.value}>
-                      {hostOption.label}
-                    </option>
+                            <option key={hostOption.value} value={hostOption.value}>
+                        {hostOption.label}
+                      </option>
                   ))}
                 </select>
                 <button
@@ -154,7 +154,12 @@ const RemoteDesktopPanel = ({
 
         {remoteDesktopSession && (
           <div className="remote-status-row">
-            <div className="remote-host-label">Connected to host: {remoteDesktopSession.hostId}</div>
+            <div className="remote-host-label">
+              Connected to host: {
+                remoteHosts.find((h) => h.hostId === remoteDesktopSession.hostId)?.label ||
+                remoteDesktopSession.hostId
+              }
+            </div>
             <button onClick={stopRemoteDesktopSession} className="btn btn-danger">
               Disconnect Desktop
             </button>
@@ -196,7 +201,10 @@ const RemoteDesktopPanel = ({
           <div className="remote-status-row">
             <div className="remote-host-label">
               {incomingRemoteDesktopRequest.requesterId} requested remote control for host{" "}
-              {incomingRemoteDesktopRequest.hostId || "unknown"}.
+              {
+                remoteHosts.find((h) => h.hostId === incomingRemoteDesktopRequest.hostId)
+                  ?.label || incomingRemoteDesktopRequest.hostId || "unknown"
+              }.
             </div>
             <button
               onClick={() => respondToRemoteDesktopRequest(true)}
@@ -234,7 +242,10 @@ const RemoteDesktopPanel = ({
         )}
         {remoteDesktopPendingRequest && !remoteDesktopSession && (
           <div className="muted-text">
-            Request sent to host {remoteDesktopPendingRequest.hostId}. Waiting for other participant approval.
+            Request sent to host {
+              remoteHosts.find((h) => h.hostId === remoteDesktopPendingRequest.hostId)?.label ||
+              remoteDesktopPendingRequest.hostId
+            }. Waiting for other participant approval.
           </div>
         )}
         {remoteHostSetupPending && !remoteDesktopSession && (

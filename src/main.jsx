@@ -14,8 +14,6 @@ import { SocketProvider } from "./Context/SocketContext";
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <BrowserRouter>
-    <SocketProvider>
-      <App />
-    </SocketProvider>
+    <SocketProvider><App /></SocketProvider>
   </BrowserRouter>
 );

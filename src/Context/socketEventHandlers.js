@@ -9,6 +9,7 @@ export const registerSocketContextEvents = ({
   dispatch,
   removePeerAction,
   setRoomParticipants,
+  setRoomParticipantProfiles,
   remoteDesktopPendingRequestRef,
   setRemoteDesktopPendingRequest,
   setRemoteDesktopError,
@@ -57,6 +58,12 @@ export const registerSocketContextEvents = ({
     }
     dispatch(removePeerAction(peerId));
     setRoomParticipants((prev) => prev.filter((id) => id !== peerId));
+    // also remove profile if tracked externally (SocketContext maintains it)
+    setRoomParticipantProfiles((prev) => {
+      const copy = { ...prev };
+      delete copy[peerId];
+      return copy;
+    });
   };
 
   const onRemoteSessionPending = ({ requestId, hostId }) => {
@@ -155,6 +162,7 @@ export const registerSocketContextEvents = ({
               hostId,
               busy: !!item?.busy,
               ownership,
+              label: String(item?.label || hostId).trim(),
             };
           })
           .filter((item) => !!item.hostId)
@@ -295,6 +303,7 @@ export const registerSocketContextEvents = ({
     setHostAppInstallPrompt(null);
     setRemoteHosts([]);
     setRoomParticipants([]);
+    setRoomParticipantProfiles({});
     setClaimedRemoteHostId("");
     autoClaimRemoteHostIdRef.current = reconnectClaimHostId;
     autoRequestRemoteHostIdRef.current = reconnectAutoRequestHostId;
