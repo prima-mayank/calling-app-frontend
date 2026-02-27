@@ -9,6 +9,9 @@ const safeParseJson = (value) => {
   }
 };
 
+export const isLocalTestAuthToken = (token) =>
+  String(token || "").trim().toLowerCase().startsWith("local-test-");
+
 export const readAuthSession = () => {
   if (typeof window === "undefined") return null;
 

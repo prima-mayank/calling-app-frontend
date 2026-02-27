@@ -11,8 +11,8 @@ import {
 } from "../features/room/utils/roomSessionStorage";
 import { refreshSocketAuthSession } from "../services/socketClient";
 import { useAuthSessionState } from "../features/auth/hooks/useAuthSessionState";
+import { isLocalTestAuthToken } from "../features/auth/utils/authStorage";
 import { useUserDirectory } from "../features/home/hooks/useUserDirectory";
-import { useDirectCallFlow } from "../features/home/hooks/useDirectCallFlow";
 import HomeGuestSection from "../features/home/components/HomeGuestSection";
 import HomeMeetSection from "../features/home/components/HomeMeetSection";
 import HomeUserDirectorySection from "../features/home/components/HomeUserDirectorySection";
@@ -20,26 +20,11 @@ import HomeDirectCallPanel from "../features/home/components/HomeDirectCallPanel
 
 const Home = () => {
   const navigate = useNavigate();
-  const { socket, provideStream, socketConnected, socketConnectError } =
-    useContext(SocketContext);
-  const [quickRejoin, setQuickRejoin] = useState(() => readQuickRejoinRoom());
-  const { session, isCheckingSession, logout } = useAuthSessionState();
-  const authToken = String(session?.token || "").trim();
-  const isLoggedIn = !!authToken && !!session?.user;
-  const isDirectCallEnabled = isLoggedIn && socketConnected;
-
   const {
-    users,
-    isLoadingUsers,
-    usersError,
-    refreshUsers,
-  } = useUserDirectory({
     socket,
-    token: authToken,
-    isEnabled: isLoggedIn,
-  });
-
-  const {
+    provideStream,
+    socketConnected,
+    socketConnectError,
     incomingCall,
     outgoingCall,
     directCallNotice,
@@ -48,10 +33,28 @@ const Home = () => {
     acceptIncomingCall,
     rejectIncomingCall,
     resetDirectCallState,
-  } = useDirectCallFlow({
+  } = useContext(SocketContext);
+  const [quickRejoin, setQuickRejoin] = useState(() => readQuickRejoinRoom());
+  const { session, isCheckingSession, logout } = useAuthSessionState();
+  const authToken = String(session?.token || "").trim();
+  const isLocalTestSession = isLocalTestAuthToken(authToken);
+  const isLoggedIn = !!authToken && !!session?.user;
+  const isDirectoryEnabled = isLoggedIn && !isLocalTestSession;
+
+  const {
+    users,
+    isLoadingUsers,
+    usersError,
+    isAuthUnavailable,
+    refreshUsers,
+  } = useUserDirectory({
     socket,
-    isEnabled: isDirectCallEnabled,
+    token: authToken,
+    isEnabled: isDirectoryEnabled,
   });
+  const isDirectCallEnabled =
+    isLoggedIn && socketConnected && !isLocalTestSession && !isAuthUnavailable;
+  const showDirectory = isLoggedIn && !isLocalTestSession && !isAuthUnavailable;
 
   const currentUserLabel = useMemo(() => {
     if (!session?.user) return "";
@@ -143,6 +146,7 @@ const Home = () => {
     startDirectCall({
       targetUserId: user?.id,
       mode: "audio",
+      isEnabled: isDirectCallEnabled,
     });
   };
 
@@ -150,6 +154,7 @@ const Home = () => {
     startDirectCall({
       targetUserId: user?.id,
       mode: "video",
+      isEnabled: isDirectCallEnabled,
     });
   };
 
@@ -193,25 +198,42 @@ const Home = () => {
           />
         )}
 
-        {isLoggedIn ? (
-          <HomeUserDirectorySection
-            users={users}
-            isLoadingUsers={isLoadingUsers}
-            usersError={usersError}
-            onRefresh={refreshUsers}
-            onCallAudio={callUserAudio}
-            onCallVideo={callUserVideo}
-            outgoingCall={outgoingCall}
-            canCall={socketConnected}
-          />
-        ) : (
-          <HomeGuestSection />
-        )}
+        <div className="home-main-sections">
+          {isLoggedIn ? (
+            showDirectory ? (
+              <HomeUserDirectorySection
+                users={users}
+                isLoadingUsers={isLoadingUsers}
+                usersError={usersError}
+                onRefresh={refreshUsers}
+                onCallAudio={callUserAudio}
+                onCallVideo={callUserVideo}
+                outgoingCall={outgoingCall}
+                canCall={isDirectCallEnabled}
+              />
+            ) : (
+              <section className="home-section panel">
+                <div className="home-section-head">
+                  <h2 className="home-section-title">Call Logged-In Users</h2>
+                  <p className="home-section-subtitle">
+                    Direct user calls are unavailable because backend authentication is disabled.
+                  </p>
+                </div>
+                <div className="home-call-notice panel">
+                  Enable backend auth (`AUTH_ENABLED=1`) with MongoDB and JWT secret to use user
+                  directory and direct calling.
+                </div>
+              </section>
+            )
+          ) : (
+            <HomeGuestSection />
+          )}
 
-        <HomeMeetSection
-          onStartVideoMeet={() => startCall(true)}
-          onStartAudioMeet={() => startCall(false)}
-        />
+          <HomeMeetSection
+            onStartVideoMeet={() => startCall(true)}
+            onStartAudioMeet={() => startCall(false)}
+          />
+        </div>
 
         {quickRejoin?.roomId && (
           <div className="home-quick-rejoin panel">

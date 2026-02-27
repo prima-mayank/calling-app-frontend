@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { fetchCurrentUser } from "../services/authApi";
-import { clearAuthSession, readAuthSession, saveAuthSession } from "../utils/authStorage";
-
-const isLocalTestToken = (token) =>
-  String(token || "").trim().toLowerCase().startsWith("local-test-");
+import {
+  clearAuthSession,
+  isLocalTestAuthToken,
+  readAuthSession,
+  saveAuthSession,
+} from "../utils/authStorage";
 
 export const useAuthSessionState = () => {
   const [session, setSession] = useState(() => readAuthSession());
@@ -42,7 +44,7 @@ export const useAuthSessionState = () => {
       return null;
     }
 
-    if (isLocalTestToken(token)) {
+    if (isLocalTestAuthToken(token)) {
       const nextSession = {
         token,
         user: activeSession?.user || null,

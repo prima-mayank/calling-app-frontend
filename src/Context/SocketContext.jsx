@@ -24,6 +24,7 @@ import { registerSocketContextEvents } from "./socketEventHandlers";
 import { useSyncedRef } from "../hooks/useSyncedRef";
 import { usePeerCallManager } from "./hooks/usePeerCallManager";
 import { useRemoteDesktopControls } from "./hooks/useRemoteDesktopControls";
+import { useDirectCallState } from "./hooks/useDirectCallState";
 export const SocketProvider = ({ children }) => {
   const navigate = useNavigate();
 
@@ -239,6 +240,21 @@ export const SocketProvider = ({ children }) => {
     setIncomingRemoteHostSetupRequest,
     setAutoClaimRemoteHostId,
     buildHostAppDownloadUrl,
+  });
+
+  const {
+    incomingCall,
+    outgoingCall,
+    directCallNotice,
+    setDirectCallNotice,
+    startDirectCall,
+    cancelOutgoingCall,
+    acceptIncomingCall,
+    rejectIncomingCall,
+    resetDirectCallState,
+  } = useDirectCallState({
+    socket,
+    navigate,
   });
 
   useEffect(() => {
@@ -686,6 +702,9 @@ export const SocketProvider = ({ children }) => {
         user,
         stream,
         peers,
+        incomingCall,
+        outgoingCall,
+        directCallNotice,
         audioEnabled,
         videoEnabled,
         remoteDesktopSession,
@@ -704,6 +723,12 @@ export const SocketProvider = ({ children }) => {
         socketConnected,
         socketConnectError,
         browserOnline,
+        setDirectCallNotice,
+        startDirectCall,
+        cancelOutgoingCall,
+        acceptIncomingCall,
+        rejectIncomingCall,
+        resetDirectCallState,
         provideStream,
         toggleMic,
         toggleCamera,

@@ -9,7 +9,7 @@
 
 .home-shell,
 .room-join-shell {
-  width: min(900px, 100%);
+  width: min(1200px, 100%);
   padding: clamp(22px, 4vw, 40px);
 }
 
@@ -17,6 +17,17 @@
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+.home-main-sections {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) minmax(280px, 1fr);
+  gap: clamp(12px, 1.8vw, 20px);
+  align-items: start;
+}
+
+.home-main-sections > * {
+  min-width: 0;
 }
 
 .home-title {
@@ -191,10 +202,12 @@
 .home-user-actions {
   display: flex;
   gap: 6px;
+  flex-wrap: nowrap;
 }
 
 .home-user-actions .btn {
-  min-width: 76px;
+  flex: 1 1 0;
+  min-width: 72px;
 }
 
 .home-direct-call-stack {
@@ -234,6 +247,18 @@
   gap: 8px;
 }
 
+.direct-call-floating-panel {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  width: min(380px, calc(100vw - 32px));
+  z-index: 120;
+}
+
+.direct-call-floating-panel .home-direct-call-stack {
+  gap: 10px;
+}
+
 .home-quick-rejoin {
   margin-top: 4px;
   padding: 14px;
@@ -270,8 +295,13 @@
   grid-column: 1 / -1;
 }
 
+@media (max-width: 980px) {
+  .home-main-sections {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 700px) {
-  .home-actions,
   .room-join-actions {
     grid-template-columns: 1fr;
   }
@@ -281,16 +311,31 @@
   }
 
   .home-user-row {
-    grid-template-columns: 1fr;
-    align-items: flex-start;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "meta meta"
+      "status actions";
+    align-items: center;
+  }
+
+  .home-user-meta {
+    grid-area: meta;
+  }
+
+  .home-user-status {
+    grid-area: status;
   }
 
   .home-user-actions {
-    width: 100%;
-    flex-wrap: wrap;
+    grid-area: actions;
+    justify-self: end;
+    width: auto;
   }
 
-  .home-user-actions .btn {
-    flex: 1 1 120px;
+  .direct-call-floating-panel {
+    top: auto;
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
   }
 }

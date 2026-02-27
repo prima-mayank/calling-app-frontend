@@ -12,6 +12,7 @@ export const useUserDirectory = ({ socket, token, isEnabled }) => {
   const [users, setUsers] = useState([]);
   const [isLoadingUsers, setIsLoadingUsers] = useState(false);
   const [usersError, setUsersError] = useState("");
+  const [isAuthUnavailable, setIsAuthUnavailable] = useState(false);
   const [onlineUserIds, setOnlineUserIds] = useState(() => new Set());
 
   const refreshUsers = useCallback(async () => {
@@ -19,6 +20,7 @@ export const useUserDirectory = ({ socket, token, isEnabled }) => {
     if (!normalizedToken || !isEnabled) {
       setUsers([]);
       setUsersError("");
+      setIsAuthUnavailable(false);
       return [];
     }
 
@@ -29,9 +31,18 @@ export const useUserDirectory = ({ socket, token, isEnabled }) => {
       const result = await fetchUserDirectory({ token: normalizedToken });
       const nextUsers = Array.isArray(result?.users) ? result.users : [];
       setUsers(nextUsers);
+      setIsAuthUnavailable(false);
       return nextUsers;
     } catch (error) {
+      const errorCode = String(error?.code || "").trim().toLowerCase();
+      if (errorCode === "auth-unavailable") {
+        setUsers([]);
+        setUsersError("");
+        setIsAuthUnavailable(true);
+        return [];
+      }
       setUsers([]);
+      setIsAuthUnavailable(false);
       setUsersError(String(error?.message || "Failed to load users.").trim());
       return [];
     } finally {
@@ -44,6 +55,7 @@ export const useUserDirectory = ({ socket, token, isEnabled }) => {
       setUsers([]);
       setOnlineUserIds(new Set());
       setUsersError("");
+      setIsAuthUnavailable(false);
       return () => {};
     }
 
@@ -101,6 +113,7 @@ export const useUserDirectory = ({ socket, token, isEnabled }) => {
     users: usersWithPresence,
     isLoadingUsers,
     usersError,
+    isAuthUnavailable,
     refreshUsers,
   };
 };
