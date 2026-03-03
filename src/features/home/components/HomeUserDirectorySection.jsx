@@ -60,7 +60,15 @@ const HomeUserDirectorySection = ({
                     className="btn btn-call-audio"
                     onClick={() => onCallAudio(user)}
                     disabled={!canCall || !isOnline || isActiveTarget}
-                    title={!canCall ? "Socket disconnected" : !isOnline ? "User is offline" : ""}
+                    title={
+                      !canCall
+                        ? "Socket disconnected"
+                        : isActiveTarget
+                        ? "Calling this user"
+                        : !isOnline
+                        ? "User is offline"
+                        : ""
+                    }
                   >
                     Audio
                   </button>
@@ -68,7 +76,15 @@ const HomeUserDirectorySection = ({
                     className="btn btn-call-video"
                     onClick={() => onCallVideo(user)}
                     disabled={!canCall || !isOnline || isActiveTarget}
-                    title={!canCall ? "Socket disconnected" : !isOnline ? "User is offline" : ""}
+                    title={
+                      !canCall
+                        ? "Socket disconnected"
+                        : isActiveTarget
+                        ? "Calling this user"
+                        : !isOnline
+                        ? "User is offline"
+                        : ""
+                    }
                   >
                     Video
                   </button>

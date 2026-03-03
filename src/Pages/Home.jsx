@@ -52,8 +52,9 @@ const Home = () => {
     token: authToken,
     isEnabled: isDirectoryEnabled,
   });
+  const isSocketReady = socketConnected || !!socket?.connected;
   const isDirectCallEnabled =
-    isLoggedIn && socketConnected && !isLocalTestSession && !isAuthUnavailable;
+    isLoggedIn && isSocketReady && !isLocalTestSession && !isAuthUnavailable;
   const showDirectory = isLoggedIn && !isLocalTestSession && !isAuthUnavailable;
 
   const currentUserLabel = useMemo(() => {
@@ -62,7 +63,7 @@ const Home = () => {
   }, [session?.user]);
 
   const ensureSocketConnection = async () => {
-    if (socketConnected || socket.connected) return true;
+    if (isSocketReady) return true;
 
     try {
       socket.connect();
@@ -183,8 +184,8 @@ const Home = () => {
           )}
         </div>
 
-        <div className={`connection-pill ${socketConnected ? "connection-pill--online" : ""}`}>
-          {socketConnected ? "Backend connected" : "Backend disconnected"}
+        <div className={`connection-pill ${isSocketReady ? "connection-pill--online" : ""}`}>
+          {isSocketReady ? "Backend connected" : "Backend disconnected"}
         </div>
 
         {(isLoggedIn || incomingCall || outgoingCall || directCallNotice) && (

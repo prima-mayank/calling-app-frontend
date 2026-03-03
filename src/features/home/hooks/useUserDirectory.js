@@ -32,6 +32,9 @@ export const useUserDirectory = ({ socket, token, isEnabled }) => {
       const nextUsers = Array.isArray(result?.users) ? result.users : [];
       setUsers(nextUsers);
       setIsAuthUnavailable(false);
+      if (socket?.connected) {
+        socket.emit("presence-subscribe");
+      }
       return nextUsers;
     } catch (error) {
       const errorCode = String(error?.code || "").trim().toLowerCase();
@@ -48,7 +51,7 @@ export const useUserDirectory = ({ socket, token, isEnabled }) => {
     } finally {
       setIsLoadingUsers(false);
     }
-  }, [isEnabled, token]);
+  }, [isEnabled, socket, token]);
 
   useEffect(() => {
     if (!isEnabled || !token) {
@@ -97,6 +100,21 @@ export const useUserDirectory = ({ socket, token, isEnabled }) => {
       window.clearInterval(intervalId);
     };
   }, [isEnabled, refreshUsers, token]);
+
+  useEffect(() => {
+    if (!isEnabled || !token || typeof document === "undefined") return () => {};
+
+    const onVisibilityChange = () => {
+      if (document.visibilityState !== "visible") return;
+      if (!socket?.connected) return;
+      socket.emit("presence-subscribe");
+    };
+
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [isEnabled, socket, token]);
 
   const usersWithPresence = useMemo(() => {
     return users.map((user) => {

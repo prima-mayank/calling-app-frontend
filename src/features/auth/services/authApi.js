@@ -1,38 +1,6 @@
-import { WS_SERVER } from "../../../config/runtimeConfig";
+import { resolveApiBase } from "../../shared/services/apiUrl";
 
-const toHttpOrigin = (value) => {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-
-  try {
-    const base =
-      typeof window !== "undefined" ? window.location.origin : "http://localhost:5000";
-    const parsed = new URL(raw, base);
-    if (parsed.protocol === "ws:") parsed.protocol = "http:";
-    if (parsed.protocol === "wss:") parsed.protocol = "https:";
-    parsed.pathname = "";
-    parsed.search = "";
-    parsed.hash = "";
-    return parsed.toString().replace(/\/+$/, "");
-  } catch {
-    return "";
-  }
-};
-
-const resolveAuthApiBase = () => {
-  const configuredApiBase = toHttpOrigin(import.meta.env.VITE_API_BASE_URL);
-  if (configuredApiBase) return `${configuredApiBase}/api/auth`;
-
-  const socketBase = toHttpOrigin(WS_SERVER);
-  if (socketBase) return `${socketBase}/api/auth`;
-
-  if (typeof window !== "undefined") {
-    return `${window.location.origin.replace(/\/+$/, "")}/api/auth`;
-  }
-  return "/api/auth";
-};
-
-const AUTH_API_BASE = resolveAuthApiBase();
+const AUTH_API_BASE = resolveApiBase("/api/auth");
 
 const parseApiError = async (response) => {
   let payload = null;
