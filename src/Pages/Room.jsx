@@ -23,6 +23,8 @@ import {
   saveQuickRejoinRoom,
 } from "../features/room/utils/roomSessionStorage";
 import { registerRemoteKeyboardControl } from "../features/remoteDesktop/utils/remoteKeyboardControl";
+import MeetingControls from "../features/meetingSummary/components/MeetingControls";
+import { resolveApiBase } from "../features/shared/services/apiUrl";
 
 const Room = () => {
   const { id } = useParams();
@@ -371,6 +373,8 @@ const Room = () => {
         setShowRemotePanel={setShowRemotePanel}
         onShareLink={handleShareLink}
       />
+
+      <MeetingControls summarizeUrl={resolveApiBase("/api/summarize")} />
 
       {shouldShowRemotePanel && (
         <RemoteDesktopPanel
