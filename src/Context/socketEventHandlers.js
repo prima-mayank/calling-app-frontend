@@ -233,6 +233,9 @@ export const registerSocketContextEvents = ({
   const onRemoteFrame = ({ sessionId, image }) => {
     if (!sessionId || typeof image !== "string") return;
     if (remoteSessionIdRef.current !== sessionId) return;
+    // Validate that the payload is a plain base64 string before embedding it
+    // in a data URL — prevents XSS via a crafted image payload.
+    if (!/^[A-Za-z0-9+/]+=*$/.test(image)) return;
 
     const frameDataUrl = `data:image/jpeg;base64,${image}`;
     const listeners = remoteFrameSubscribersRef.current;

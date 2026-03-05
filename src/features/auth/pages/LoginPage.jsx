@@ -4,6 +4,7 @@ import { AuthShell } from "../components/AuthShell";
 import { loginWithPassword } from "../services/authApi";
 import { saveAuthSession } from "../utils/authStorage";
 import { refreshSocketAuthSession } from "../../../services/socketClient";
+import { validateLoginForm } from "../utils/authValidation";
 
 const LoginPage = () => {
   const navigate = useNavigate();
@@ -16,6 +17,12 @@ const LoginPage = () => {
   const onSubmit = async (event) => {
     event.preventDefault();
     if (isSubmitting) return;
+
+    const validationError = validateLoginForm({ email, password });
+    if (validationError) {
+      setError(validationError);
+      return;
+    }
 
     setIsSubmitting(true);
     setError("");
