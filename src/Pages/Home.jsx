@@ -28,6 +28,9 @@ const Home = () => {
     incomingCall,
     outgoingCall,
     directCallNotice,
+    notificationPermissionState,
+    canShowCallNotifications,
+    requestCallNotificationPermission,
     startDirectCall,
     cancelOutgoingCall,
     acceptIncomingCall,
@@ -40,6 +43,7 @@ const Home = () => {
   const isLocalTestSession = isLocalTestAuthToken(authToken);
   const isLoggedIn = !!authToken && !!session?.user;
   const isDirectoryEnabled = isLoggedIn && !isLocalTestSession;
+  const [notificationPermissionNotice, setNotificationPermissionNotice] = useState("");
 
   const {
     users,
@@ -56,6 +60,7 @@ const Home = () => {
   const isDirectCallEnabled =
     isLoggedIn && isSocketReady && !isLocalTestSession && !isAuthUnavailable;
   const showDirectory = isLoggedIn && !isLocalTestSession && !isAuthUnavailable;
+  const shouldShowNotificationControls = isLoggedIn && !isLocalTestSession;
 
   const currentUserLabel = useMemo(() => {
     if (!session?.user) return "";
@@ -143,6 +148,27 @@ const Home = () => {
     refreshSocketAuthSession();
   };
 
+  const onEnableCallNotifications = async () => {
+    const result = await requestCallNotificationPermission();
+    if (result === "granted") {
+      setNotificationPermissionNotice("Call notifications are enabled.");
+      return;
+    }
+    if (result === "denied") {
+      setNotificationPermissionNotice(
+        "Notifications are blocked. Enable browser notifications for this site."
+      );
+      return;
+    }
+    if (result === "unsupported") {
+      setNotificationPermissionNotice(
+        "Notifications are not supported in this browser/context."
+      );
+      return;
+    }
+    setNotificationPermissionNotice("Permission is still pending.");
+  };
+
   const callUserAudio = (user) => {
     startDirectCall({
       targetUserId: user?.id,
@@ -183,6 +209,35 @@ const Home = () => {
             <span className="home-account-label">No active account session</span>
           )}
         </div>
+
+        {shouldShowNotificationControls && notificationPermissionState === "default" ? (
+          <div className="home-notification-row panel">
+            <span className="home-notification-label">
+              Enable call notifications to get Accept/Reject popup when app is in background.
+            </span>
+            <button className="btn btn-default" onClick={onEnableCallNotifications}>
+              Enable Call Notifications
+            </button>
+          </div>
+        ) : null}
+
+        {shouldShowNotificationControls && notificationPermissionState === "denied" ? (
+          <div className="home-notification-row panel">
+            <span className="home-notification-label">
+              Browser notifications are blocked for this site.
+            </span>
+          </div>
+        ) : null}
+
+        {shouldShowNotificationControls && canShowCallNotifications ? (
+          <div className="home-notification-row panel">
+            <span className="home-notification-label">Call notifications are enabled.</span>
+          </div>
+        ) : null}
+
+        {notificationPermissionNotice ? (
+          <div className="home-notification-hint muted-text">{notificationPermissionNotice}</div>
+        ) : null}
 
         <div className={`connection-pill ${isSocketReady ? "connection-pill--online" : ""}`}>
           {isSocketReady ? "Backend connected" : "Backend disconnected"}

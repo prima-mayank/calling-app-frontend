@@ -4,11 +4,22 @@ import {
   closeDirectCallIncomingNotification,
   consumeDirectCallActionFromUrl,
   ensureDirectCallNotificationServiceWorker,
+  isDirectCallNotificationOwnedByCurrentTab,
   listenToDirectCallNotificationActions,
   showDirectCallIncomingNotification,
 } from "../../features/directCall/services/callNotificationService";
+import { useWindowActivityState } from "../../features/directCall/hooks/useWindowActivityState";
+import { useDirectCallNotificationPermission } from "../../features/directCall/hooks/useDirectCallNotificationPermission";
+
+const PENDING_NOTIFICATION_ACTION_TTL_MS = 30_000;
+const NOTIFICATION_RETRY_INTERVAL_MS = 1_600;
 
 const normalizeText = (value) => String(value || "").trim();
+const normalizeNotificationAction = (value) => {
+  const action = normalizeText(value).toLowerCase();
+  if (action === "accept" || action === "reject") return action;
+  return "";
+};
 const resolveCallerLabel = (caller) => {
   const displayName = normalizeText(caller?.displayName);
   if (displayName) return displayName;
@@ -25,8 +36,27 @@ export const useDirectCallState = ({ socket, navigate }) => {
   const outgoingCallRef = useRef(null);
   const incomingCallRef = useRef(null);
   const pageNotificationRef = useRef(null);
-  const lastNotifiedRequestIdRef = useRef("");
+  const activeNotificationRequestIdRef = useRef("");
   const pendingNotificationActionRef = useRef(null);
+
+  const { shouldUseSystemNotification } = useWindowActivityState();
+  const {
+    notificationPermissionState,
+    canShowCallNotifications,
+    requestCallNotificationPermission,
+  } = useDirectCallNotificationPermission();
+
+  const storePendingNotificationAction = useCallback(({ action, requestId }) => {
+    const normalizedAction = normalizeNotificationAction(action);
+    const normalizedRequestId = normalizeText(requestId);
+    if (!normalizedAction || !normalizedRequestId) return;
+
+    pendingNotificationActionRef.current = {
+      action: normalizedAction,
+      requestId: normalizedRequestId,
+      receivedAt: Date.now(),
+    };
+  }, []);
 
   useEffect(() => {
     outgoingCallRef.current = outgoingCall;
@@ -36,35 +66,47 @@ export const useDirectCallState = ({ socket, navigate }) => {
     incomingCallRef.current = incomingCall;
   }, [incomingCall]);
 
-  const closeBrowserIncomingNotification = useCallback((requestId = "") => {
+  const closeBrowserIncomingNotification = useCallback(
+    (requestId = "", options = {}) => {
+      const { onlyIfOwnedByCurrentTab = true } = options;
     const normalizedRequestId =
       normalizeText(requestId) || normalizeText(incomingCallRef.current?.requestId);
     const fallbackNotification = pageNotificationRef.current;
     pageNotificationRef.current = null;
+    if (
+      !normalizedRequestId ||
+      activeNotificationRequestIdRef.current === normalizedRequestId
+    ) {
+      activeNotificationRequestIdRef.current = "";
+    }
+
     void closeDirectCallIncomingNotification({
       requestId: normalizedRequestId,
       fallbackNotification,
+      onlyIfOwnedByCurrentTab,
     });
-  }, []);
+    },
+    []
+  );
 
   const showBrowserIncomingNotification = useCallback(
     async (callPayload) => {
       const requestId = normalizeText(callPayload?.requestId);
-      if (!requestId) return;
-
-      if (typeof document !== "undefined" && document.visibilityState === "visible") {
-        closeBrowserIncomingNotification();
-        return;
+      if (!requestId) return false;
+      if (!shouldUseSystemNotification) {
+        closeBrowserIncomingNotification(requestId);
+        return false;
       }
 
-      if (
-        lastNotifiedRequestIdRef.current === requestId &&
-        pageNotificationRef.current
-      ) {
-        return;
+      if (activeNotificationRequestIdRef.current === requestId) {
+        return true;
       }
 
-      closeBrowserIncomingNotification(lastNotifiedRequestIdRef.current);
+      const previousRequestId = normalizeText(activeNotificationRequestIdRef.current);
+      if (previousRequestId && previousRequestId !== requestId) {
+        closeBrowserIncomingNotification(previousRequestId);
+      }
+
       const callerLabel = resolveCallerLabel(callPayload?.caller);
       const result = await showDirectCallIncomingNotification({
         requestId,
@@ -78,17 +120,34 @@ export const useDirectCallState = ({ socket, navigate }) => {
         },
       });
 
+      if (result?.kind === "none") {
+        return false;
+      }
+
       if (result?.notification) {
-        result.notification.onclose = () => {
+        const existingOnClose = result.notification.onclose;
+        result.notification.onclose = (...args) => {
           if (pageNotificationRef.current === result.notification) {
             pageNotificationRef.current = null;
+          }
+          if (activeNotificationRequestIdRef.current === requestId) {
+            activeNotificationRequestIdRef.current = "";
+          }
+          if (typeof existingOnClose === "function") {
+            existingOnClose(...args);
           }
         };
         pageNotificationRef.current = result.notification;
       }
-      lastNotifiedRequestIdRef.current = requestId;
+
+      activeNotificationRequestIdRef.current = requestId;
+      return true;
     },
-    [closeBrowserIncomingNotification, navigate]
+    [
+      closeBrowserIncomingNotification,
+      navigate,
+      shouldUseSystemNotification,
+    ]
   );
 
   const acceptIncomingCall = useCallback(
@@ -108,6 +167,7 @@ export const useDirectCallState = ({ socket, navigate }) => {
         accepted: true,
       });
 
+      pendingNotificationActionRef.current = null;
       closeBrowserIncomingNotification(requestId);
       setIncomingCall(null);
       setDirectCallNotice("");
@@ -132,6 +192,8 @@ export const useDirectCallState = ({ socket, navigate }) => {
         requestId,
         accepted: false,
       });
+
+      pendingNotificationActionRef.current = null;
       closeBrowserIncomingNotification(requestId);
       setIncomingCall(null);
       setDirectCallNotice("Call rejected.");
@@ -142,8 +204,11 @@ export const useDirectCallState = ({ socket, navigate }) => {
 
   useEffect(() => {
     void ensureDirectCallNotificationServiceWorker();
-    pendingNotificationActionRef.current = consumeDirectCallActionFromUrl();
-  }, []);
+    const pendingActionFromUrl = consumeDirectCallActionFromUrl();
+    if (pendingActionFromUrl) {
+      storePendingNotificationAction(pendingActionFromUrl);
+    }
+  }, [storePendingNotificationAction]);
 
   useEffect(() => {
     const onDirectCallIncoming = (payload = {}) => {
@@ -192,11 +257,14 @@ export const useDirectCallState = ({ socket, navigate }) => {
       const activeIncoming = incomingCallRef.current;
       const incomingRequestId = normalizeText(activeIncoming?.requestId);
       const cancelledRequestId = normalizeText(payload.requestId);
+      if (cancelledRequestId) {
+        closeBrowserIncomingNotification(cancelledRequestId);
+      }
       if (!incomingRequestId || incomingRequestId !== cancelledRequestId) {
         return;
       }
 
-      closeBrowserIncomingNotification(cancelledRequestId);
+      pendingNotificationActionRef.current = null;
       setIncomingCall(null);
       setDirectCallNotice(
         normalizeText(payload.message) || "Incoming call is no longer available."
@@ -210,6 +278,7 @@ export const useDirectCallState = ({ socket, navigate }) => {
     };
 
     const onSocketDisconnect = () => {
+      pendingNotificationActionRef.current = null;
       closeBrowserIncomingNotification();
       setIncomingCall(null);
       setOutgoingCall(null);
@@ -238,35 +307,87 @@ export const useDirectCallState = ({ socket, navigate }) => {
 
   useEffect(() => {
     return listenToDirectCallNotificationActions(({ action, requestId }) => {
-      if (action === "accept") {
-        void acceptIncomingCall({ expectedRequestId: requestId });
-        return;
-      }
-      if (action === "reject") {
-        void rejectIncomingCall({ expectedRequestId: requestId });
+      const normalizedAction = normalizeNotificationAction(action);
+      const normalizedRequestId = normalizeText(requestId);
+      if (!normalizedAction || !normalizedRequestId) return;
+
+      const handled =
+        normalizedAction === "accept"
+          ? acceptIncomingCall({ expectedRequestId: normalizedRequestId })
+          : rejectIncomingCall({ expectedRequestId: normalizedRequestId });
+
+      if (!handled) {
+        storePendingNotificationAction({
+          action: normalizedAction,
+          requestId: normalizedRequestId,
+        });
       }
     });
-  }, [acceptIncomingCall, rejectIncomingCall]);
+  }, [acceptIncomingCall, rejectIncomingCall, storePendingNotificationAction]);
 
   useEffect(() => {
     const activeRequestId = normalizeText(incomingCall?.requestId);
     if (!activeRequestId) {
-      lastNotifiedRequestIdRef.current = "";
+      pendingNotificationActionRef.current = null;
+      activeNotificationRequestIdRef.current = "";
       closeBrowserIncomingNotification();
       return;
     }
 
-    if (typeof document !== "undefined" && document.visibilityState === "visible") {
-      closeBrowserIncomingNotification();
+    if (!shouldUseSystemNotification) {
+      if (isDirectCallNotificationOwnedByCurrentTab(activeRequestId)) {
+        closeBrowserIncomingNotification(activeRequestId, {
+          onlyIfOwnedByCurrentTab: true,
+        });
+      }
       return;
     }
 
     void showBrowserIncomingNotification(incomingCall);
-  }, [closeBrowserIncomingNotification, incomingCall, showBrowserIncomingNotification]);
+  }, [
+    closeBrowserIncomingNotification,
+    incomingCall,
+    shouldUseSystemNotification,
+    showBrowserIncomingNotification,
+  ]);
+
+  useEffect(() => {
+    const activeRequestId = normalizeText(incomingCall?.requestId);
+    if (
+      !activeRequestId ||
+      !shouldUseSystemNotification ||
+      notificationPermissionState === "denied" ||
+      notificationPermissionState === "unsupported"
+    ) {
+      return () => {};
+    }
+
+    const intervalId = window.setInterval(() => {
+      if (activeNotificationRequestIdRef.current === activeRequestId) return;
+      const activeIncomingCall = incomingCallRef.current;
+      if (!activeIncomingCall) return;
+      void showBrowserIncomingNotification(activeIncomingCall);
+    }, NOTIFICATION_RETRY_INTERVAL_MS);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [
+    incomingCall,
+    notificationPermissionState,
+    shouldUseSystemNotification,
+    showBrowserIncomingNotification,
+  ]);
 
   useEffect(() => {
     const pendingAction = pendingNotificationActionRef.current;
     if (!pendingAction) return;
+
+    if (Date.now() - Number(pendingAction.receivedAt || 0) > PENDING_NOTIFICATION_ACTION_TTL_MS) {
+      pendingNotificationActionRef.current = null;
+      return;
+    }
+
     const activeRequestId = normalizeText(incomingCall?.requestId);
     if (!activeRequestId || pendingAction.requestId !== activeRequestId) {
       return;
@@ -282,32 +403,8 @@ export const useDirectCallState = ({ socket, navigate }) => {
   }, [acceptIncomingCall, incomingCall, rejectIncomingCall]);
 
   useEffect(() => {
-    if (typeof document === "undefined") return () => {};
-
-    const onVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        closeBrowserIncomingNotification();
-        return;
-      }
-
-      const activeIncomingCall = incomingCallRef.current;
-      const activeRequestId = normalizeText(activeIncomingCall?.requestId);
-      if (!activeRequestId) {
-        closeBrowserIncomingNotification();
-        return;
-      }
-
-      void showBrowserIncomingNotification(activeIncomingCall);
-    };
-
-    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
-      document.removeEventListener("visibilitychange", onVisibilityChange);
-    };
-  }, [closeBrowserIncomingNotification, showBrowserIncomingNotification]);
-
-  useEffect(() => {
-    return () => {
+      pendingNotificationActionRef.current = null;
       closeBrowserIncomingNotification();
     };
   }, [closeBrowserIncomingNotification]);
@@ -347,6 +444,7 @@ export const useDirectCallState = ({ socket, navigate }) => {
   }, [socket]);
 
   const resetDirectCallState = useCallback(() => {
+    pendingNotificationActionRef.current = null;
     closeBrowserIncomingNotification();
     setIncomingCall(null);
     setOutgoingCall(null);
@@ -357,6 +455,9 @@ export const useDirectCallState = ({ socket, navigate }) => {
     incomingCall,
     outgoingCall,
     directCallNotice,
+    notificationPermissionState,
+    canShowCallNotifications,
+    requestCallNotificationPermission,
     setDirectCallNotice,
     startDirectCall,
     cancelOutgoingCall,
