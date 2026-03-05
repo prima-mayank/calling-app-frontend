@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useRef, useState, useReducer } from "react";
+import { useCallback, useEffect, useRef, useState, useReducer } from "react";
 import { useNavigate } from "react-router-dom";
 import Peer from "peerjs";
 import { v4 as UUIDv4 } from "uuid";
@@ -6,7 +6,6 @@ import { v4 as UUIDv4 } from "uuid";
 import { peerReducer } from "../Reducers/peerReducer";
 import { removePeerAction } from "../Actions/peerAction";
 import { SocketContext } from "./socketContextValue";
-import { startAdaptiveVideo } from "../utils/peerAdaptiveVideo";
 import {
   getOrCreateStablePeerId,
   rotateStablePeerId,
@@ -25,16 +24,25 @@ import { useSyncedRef } from "../hooks/useSyncedRef";
 import { usePeerCallManager } from "./hooks/usePeerCallManager";
 import { useRemoteDesktopControls } from "./hooks/useRemoteDesktopControls";
 import { useDirectCallState } from "./hooks/useDirectCallState";
+import { useMediaStream } from "../hooks/useMediaStream";
+import { useScreenShare } from "../hooks/useScreenShare";
+import { useSocketConnectivity } from "../hooks/useSocketConnectivity";
+
 export const SocketProvider = ({ children }) => {
   const navigate = useNavigate();
 
+  // ── Media stream ──────────────────────────────────────────────────────────
+  const { stream, setStream, audioEnabled, videoEnabled, setVideoEnabled, provideStream, toggleMic } =
+    useMediaStream();
+
+  // ── PeerJS user instance ──────────────────────────────────────────────────
   const [user, setUser] = useState(() => {
     const stablePeerId = getOrCreateStablePeerId({ prefix: "peer" }) || UUIDv4();
     return new Peer(stablePeerId, buildPeerConnectionConfig());
   });
-  const [stream, setStream] = useState(null);
   const [peers, dispatch] = useReducer(peerReducer, {});
 
+  // ── Refs ──────────────────────────────────────────────────────────────────
   const callsRef = useRef({});
   const pendingParticipantsRef = useRef([]);
   const remoteSessionIdRef = useRef(null);
@@ -42,14 +50,9 @@ export const SocketProvider = ({ children }) => {
   const remoteInputDebugRef = useRef({ count: 0, lastLoggedAt: 0 });
   const remoteFrameSubscribersRef = useRef(new Set());
   const hasRemoteDesktopFrameRef = useRef(false);
-  const screenShareTrackRef = useRef(null);
-  const cameraTrackBeforeShareRef = useRef(null);
-  const adaptiveVideoControllerRef = useRef(null);
+  const manualShutdownRef = useRef(false);
 
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const [videoEnabled, setVideoEnabled] = useState(true);
-  const [isScreenSharing, setIsScreenSharing] = useState(false);
-
+  // ── Remote desktop state ──────────────────────────────────────────────────
   const [remoteDesktopSession, setRemoteDesktopSession] = useState(null);
   const [remoteDesktopPendingRequest, setRemoteDesktopPendingRequest] = useState(null);
   const [remoteHosts, setRemoteHosts] = useState([]);
@@ -65,13 +68,8 @@ export const SocketProvider = ({ children }) => {
   const [hasRemoteDesktopFrame, setHasRemoteDesktopFrame] = useState(false);
   const [remoteDesktopError, setRemoteDesktopError] = useState("");
   const [hostAppInstallPrompt, setHostAppInstallPrompt] = useState(null);
-  const [socketConnected, setSocketConnected] = useState(socket.connected);
-  const [socketConnectError, setSocketConnectError] = useState("");
-  const [browserOnline, setBrowserOnline] = useState(
-    typeof navigator === "undefined" ? true : navigator.onLine !== false
-  );
-  const manualShutdownRef = useRef(false);
 
+  // ── Synced refs (always reflect latest state value for async callbacks) ───
   const userRef = useSyncedRef(user);
   const streamRef = useSyncedRef(stream);
   const claimedRemoteHostIdRef = useSyncedRef(claimedRemoteHostId);
@@ -106,9 +104,7 @@ export const SocketProvider = ({ children }) => {
   }, [userRef]);
 
   const subscribeRemoteDesktopFrame = useCallback((listener) => {
-    if (typeof listener !== "function") {
-      return () => {};
-    }
+    if (typeof listener !== "function") return () => {};
 
     const listeners = remoteFrameSubscribersRef.current;
     listeners.add(listener);
@@ -135,6 +131,7 @@ export const SocketProvider = ({ children }) => {
     setRoomParticipantProfiles,
   });
 
+  // ── PeerJS lifecycle ──────────────────────────────────────────────────────
   useEffect(() => {
     if (!user) return () => {};
 
@@ -202,17 +199,11 @@ export const SocketProvider = ({ children }) => {
     };
   }, [clearAllPeerConnections, drainPendingParticipants, streamRef, user]);
 
-  const stopAdaptiveVideo = useCallback(() => {
-    const controller = adaptiveVideoControllerRef.current;
-    if (!controller) return;
-    try {
-      controller.stop();
-    } catch {
-      // noop
-    }
-    adaptiveVideoControllerRef.current = null;
-  }, []);
+  // ── Screen sharing + adaptive video ───────────────────────────────────────
+  const { isScreenSharing, startScreenShare, stopScreenShare, stopAdaptiveVideo, cleanupScreenShare } =
+    useScreenShare({ stream, streamRef, setStream, setVideoEnabled, callsRef, getPeerConnections });
 
+  // ── Remote desktop controls ───────────────────────────────────────────────
   const {
     refreshRemoteHosts,
     requestRemoteDesktopSession,
@@ -242,6 +233,7 @@ export const SocketProvider = ({ children }) => {
     buildHostAppDownloadUrl,
   });
 
+  // ── Direct calls ──────────────────────────────────────────────────────────
   const {
     incomingCall,
     outgoingCall,
@@ -255,224 +247,16 @@ export const SocketProvider = ({ children }) => {
     acceptIncomingCall,
     rejectIncomingCall,
     resetDirectCallState,
-  } = useDirectCallState({
+  } = useDirectCallState({ socket, navigate });
+
+  // ── Socket + browser network state ───────────────────────────────────────
+  const { socketConnected, socketConnectError, browserOnline } = useSocketConnectivity({
     socket,
-    navigate,
+    reconnectPeerIfNeeded,
+    refreshRemoteHosts,
   });
 
-  useEffect(() => {
-    const onConnect = () => {
-      setSocketConnected(true);
-      setSocketConnectError("");
-      refreshRemoteHosts();
-      reconnectPeerIfNeeded();
-    };
-    const onDisconnect = () => setSocketConnected(false);
-    const onConnectError = (error) => {
-      setSocketConnected(false);
-      const message = String(error?.message || "").trim();
-      setSocketConnectError(message || "connect-error");
-    };
-
-    socket.on("connect", onConnect);
-    socket.on("disconnect", onDisconnect);
-    socket.on("connect_error", onConnectError);
-
-    return () => {
-      socket.off("connect", onConnect);
-      socket.off("disconnect", onDisconnect);
-      socket.off("connect_error", onConnectError);
-    };
-  }, [reconnectPeerIfNeeded, refreshRemoteHosts]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return () => {};
-
-    const onOnline = () => {
-      setBrowserOnline(true);
-      reconnectPeerIfNeeded();
-      if (!socket.connected && typeof socket.connect === "function") {
-        socket.connect();
-      }
-    };
-
-    const onOffline = () => {
-      setBrowserOnline(false);
-    };
-
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
-
-    return () => {
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
-    };
-  }, [reconnectPeerIfNeeded]);
-
-  const provideStream = async (isVideoCall = true) => {
-    const mediaApiMissing = !navigator.mediaDevices?.getUserMedia;
-
-    if (mediaApiMissing) {
-      return null;
-    }
-
-    try {
-      const constraints = {
-        audio: true,
-        video: isVideoCall ? true : false,
-      };
-
-      const media = await navigator.mediaDevices.getUserMedia(constraints);
-
-      setStream(media);
-      setAudioEnabled(media.getAudioTracks().some((t) => t.enabled));
-
-      if (isVideoCall) {
-        setVideoEnabled(media.getVideoTracks().some((t) => t.enabled));
-      } else {
-        setVideoEnabled(false);
-      }
-
-      return media;
-    } catch (err) {
-      console.error("getUserMedia failed:", err?.name || err, err);
-
-      if (err?.name === "NotAllowedError") {
-        return null;
-      }
-
-      if (err?.name === "NotFoundError" || err?.name === "DevicesNotFoundError") {
-        return null;
-      }
-
-      if (err?.name === "NotReadableError") {
-        return null;
-      }
-
-      return null;
-    }
-  };
-
-  useEffect(() => {
-    stopAdaptiveVideo();
-
-    if (!stream || isScreenSharing) return;
-    if (stream.getVideoTracks().length === 0) return;
-
-    adaptiveVideoControllerRef.current = startAdaptiveVideo(stream, {
-      checkIntervalMs: 3500,
-      getPeerConnections,
-      lowConstraints: {
-        width: { ideal: 426, max: 640 },
-        height: { ideal: 240, max: 360 },
-        frameRate: { ideal: 12, max: 15 },
-      },
-      veryLowConstraints: {
-        width: { ideal: 320, max: 426 },
-        height: { ideal: 180, max: 240 },
-        frameRate: { ideal: 8, max: 10 },
-      },
-    });
-
-    return () => {
-      stopAdaptiveVideo();
-    };
-  }, [getPeerConnections, isScreenSharing, stopAdaptiveVideo, stream]);
-
-  const replaceOutgoingVideoTrack = useCallback(async (nextTrack) => {
-    const calls = Object.values(callsRef.current);
-    await Promise.all(
-      calls.map(async (call) => {
-        const senders = call?.peerConnection?.getSenders?.() || [];
-        const videoSender = senders.find((sender) => sender?.track?.kind === "video");
-        if (!videoSender) return;
-        try {
-          await videoSender.replaceTrack(nextTrack || null);
-        } catch (err) {
-          void err;
-        }
-      })
-    );
-  }, []);
-
-  const stopScreenShare = useCallback(async () => {
-    const activeShareTrack = screenShareTrackRef.current;
-    const previousCameraTrack = cameraTrackBeforeShareRef.current;
-
-    if (!activeShareTrack && !isScreenSharing) return;
-
-    screenShareTrackRef.current = null;
-    cameraTrackBeforeShareRef.current = null;
-    setIsScreenSharing(false);
-
-    const restoredCameraTrack =
-      previousCameraTrack && previousCameraTrack.readyState === "live"
-        ? previousCameraTrack
-        : null;
-
-    await replaceOutgoingVideoTrack(restoredCameraTrack);
-
-    const currentStream = streamRef.current;
-    const audioTracks = currentStream ? currentStream.getAudioTracks() : [];
-    const nextTracks = [...audioTracks];
-    if (restoredCameraTrack) {
-      nextTracks.push(restoredCameraTrack);
-    }
-
-    setStream(nextTracks.length > 0 ? new MediaStream(nextTracks) : null);
-    setVideoEnabled(!!restoredCameraTrack && restoredCameraTrack.enabled);
-
-    if (activeShareTrack && activeShareTrack.readyState === "live") {
-      activeShareTrack.stop();
-    }
-  }, [isScreenSharing, replaceOutgoingVideoTrack, streamRef]);
-
-  const startScreenShare = useCallback(async () => {
-    if (isScreenSharing) return;
-    if (!navigator.mediaDevices?.getDisplayMedia) {
-      alert("Screen sharing is not supported in this browser.");
-      return;
-    }
-
-    const currentStream = streamRef.current;
-    const currentCameraTrack = currentStream?.getVideoTracks?.()[0] || null;
-    if (!currentStream || !currentCameraTrack) {
-      alert("Join with video first to start screen sharing.");
-      return;
-    }
-
-    try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: false,
-      });
-      const displayTrack = displayStream.getVideoTracks?.()[0] || null;
-      if (!displayTrack) return;
-
-      cameraTrackBeforeShareRef.current = currentCameraTrack;
-      screenShareTrackRef.current = displayTrack;
-
-      await replaceOutgoingVideoTrack(displayTrack);
-
-      const nextTracks = [...currentStream.getAudioTracks(), displayTrack];
-      setStream(new MediaStream(nextTracks));
-      setVideoEnabled(true);
-      setIsScreenSharing(true);
-
-      displayTrack.addEventListener(
-        "ended",
-        () => {
-          void stopScreenShare();
-        },
-        { once: true }
-      );
-    } catch (err) {
-      if (err?.name === "NotAllowedError") return;
-      console.error("getDisplayMedia failed:", err);
-      alert("Failed to start screen sharing.");
-    }
-  }, [isScreenSharing, replaceOutgoingVideoTrack, stopScreenShare, streamRef]);
-
+  // ── Socket event handlers (room, remote desktop, presence) ───────────────
   useEffect(() => {
     return registerSocketContextEvents({
       socket,
@@ -526,6 +310,7 @@ export const SocketProvider = ({ children }) => {
     refreshRemoteHosts();
   }, [refreshRemoteHosts]);
 
+  // ── Incoming calls + user-joined ──────────────────────────────────────────
   useEffect(() => {
     if (!user || !stream) return;
 
@@ -536,9 +321,7 @@ export const SocketProvider = ({ children }) => {
 
     const onUserJoined = ({ peerId, participantProfile }) => {
       if (!peerId || peerId === user.id) return;
-      setRoomParticipants((prev) =>
-        prev.includes(peerId) ? prev : [...prev, peerId]
-      );
+      setRoomParticipants((prev) => (prev.includes(peerId) ? prev : [...prev, peerId]));
 
       const profile = participantProfile || {};
       const normalizedDisplayName = String(profile.displayName || "").trim();
@@ -611,25 +394,13 @@ export const SocketProvider = ({ children }) => {
     user,
   ]);
 
-  const toggleMic = () => {
-    if (!stream) return;
-    stream.getAudioTracks().forEach((t) => {
-      t.enabled = !t.enabled;
-    });
-    setAudioEnabled(stream.getAudioTracks().some((t) => t.enabled));
-    setStream(new MediaStream(stream.getTracks()));
-  };
-
+  // ── Media controls ────────────────────────────────────────────────────────
   const toggleCamera = () => {
-    if (!stream) return;
-    if (isScreenSharing) {
-      return;
-    }
+    if (!stream || isScreenSharing) return;
 
     const videoTracks = stream.getVideoTracks();
-    if (videoTracks.length === 0) {
-      return;
-    }
+    if (videoTracks.length === 0) return;
+
     videoTracks.forEach((t) => {
       t.enabled = !t.enabled;
     });
@@ -637,6 +408,7 @@ export const SocketProvider = ({ children }) => {
     setStream(new MediaStream(stream.getTracks()));
   };
 
+  // ── End call ──────────────────────────────────────────────────────────────
   const endCall = (roomId) => {
     manualShutdownRef.current = true;
     stopAdaptiveVideo();
@@ -668,19 +440,10 @@ export const SocketProvider = ({ children }) => {
     hasRemoteDesktopFrameRef.current = false;
     setHasRemoteDesktopFrame(false);
     setRemoteDesktopError("");
-    setIsScreenSharing(false);
     setRoomParticipants([]);
     setRoomParticipantProfiles({});
 
-    if (screenShareTrackRef.current) {
-      try {
-        screenShareTrackRef.current.stop();
-      } catch {
-        // noop
-      }
-      screenShareTrackRef.current = null;
-    }
-    cameraTrackBeforeShareRef.current = null;
+    cleanupScreenShare();
 
     Object.keys(peers).forEach((pid) => {
       dispatch(removePeerAction(pid));
@@ -759,5 +522,3 @@ export const SocketProvider = ({ children }) => {
     </SocketContext.Provider>
   );
 };
-
-
